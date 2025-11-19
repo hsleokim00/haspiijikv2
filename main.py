@@ -42,32 +42,74 @@ def fetch_corp_metrics(name: str) -> dict:
     """
     회사 데이터를 가져오되, 어떤 오류가 나도 스트림릿 앱이 죽지 않도록
     전부 try/except로 감싼 안전 버전.
+    - 반환 형식:
+      {
+        "metrics": {...},    # 실제 숫자들 (없으면 {})
+        "warnings": [...],   # DART/Worker에서 온 경고·설명 메시지
+        "debug": {...},      # 연도별 성공/실패 정보
+        "ok": True/False,    # Worker의 ok 플래그
+        "error": "..."       # Worker의 error (있다면)
+      }
     """
     corp = (name or "").strip()
     if not corp:
-        return {}  # 회사명을 안 넣었으면 그냥 빈 데이터로 처리
+        return {
+            "metrics": {},
+            "warnings": ["회사명이 입력되지 않았습니다."],
+            "debug": {},
+            "ok": False,
+            "error": "회사명이 비어 있습니다.",
+        }
 
     try:
         url = f"{API_BASE}?corp={requests.utils.quote(corp)}"
         res = requests.get(url, timeout=10)
 
-        # HTTP 상태코드가 200이 아니면, 그냥 빈 데이터 반환
+        # HTTP 상태코드가 200이 아니면, 이유를 warnings에 남김
         if not res.ok:
-            return {}
+            msg = f"회사 데이터 API 호출 실패 (HTTP {res.status_code}). DART 응답을 가져오지 못했습니다."
+            return {
+                "metrics": {},
+                "warnings": [msg],
+                "debug": {},
+                "ok": False,
+                "error": msg,
+            }
 
         data = res.json()
-
-        # Worker가 ok=False를 준 경우
-        if not data.get("ok"):
-            return {}
-
-        return data.get("metrics") or {}
-
-    except Exception:
+    except Exception as e:
         # 네트워크 오류, JSON 파싱 오류 포함 모든 예외를 여기서 흡수
-        return {}
+        msg = f"회사 데이터를 불러오는 중 오류가 발생했습니다: {e}"
+        return {
+            "metrics": {},
+            "warnings": [msg],
+            "debug": {},
+            "ok": False,
+            "error": msg,
+        }
 
-    return data.get("metrics") or {}
+    ok = bool(data.get("ok"))
+    metrics = data.get("metrics") or {}
+
+    # Worker에서 내려준 warnings를 최대한 살려서 보여줌
+    warnings = []
+    if isinstance(data.get("warnings"), list):
+        for w in data["warnings"]:
+            if w:
+                warnings.append(str(w))
+
+    # ok=False 인 경우 error 메시지도 warnings에 추가
+    if not ok:
+        err_msg = data.get("error") or "회사 데이터를 가져오지 못했습니다."
+        warnings.append(str(err_msg))
+
+    return {
+        "metrics": metrics,
+        "warnings": warnings,
+        "debug": data.get("debug") or {},
+        "ok": ok,
+        "error": data.get("error"),
+    }
 
 
 def get_industry_growth(industry: str) -> float:
@@ -121,6 +163,7 @@ def compute_job_change(
 ):
     """
     HTML 2페이지(이직 여부 결정)에서 하던 Wp/Wk 계산.
+    DART/Worker에서 오는 경고 메시지도 함께 결과에 담는다.
     """
     if not current_industry or not target_industry:
         raise ValueError("현재 직종과 이직 고려 직종을 모두 선택해야 합니다.")
@@ -131,9 +174,12 @@ def compute_job_change(
     if not current_corp.strip() or not next_corp.strip():
         raise ValueError("현재 기업과 이직 고려 기업명을 모두 입력해야 합니다.")
 
-    # 회사 metrics 조회
-    now_metrics = fetch_corp_metrics(current_corp)
-    next_metrics = fetch_corp_metrics(next_corp)
+    # 회사 metrics + warnings 조회
+    now_info = fetch_corp_metrics(current_corp)
+    next_info = fetch_corp_metrics(next_corp)
+
+    now_metrics = now_info["metrics"]
+    next_metrics = next_info["metrics"]
 
     # 산업 성장률
     g_now_ind = get_industry_growth(current_industry)
@@ -170,6 +216,8 @@ def compute_job_change(
         "decision": decision,
         "now_metrics": now_metrics,
         "next_metrics": next_metrics,
+        "now_warnings": now_info["warnings"],
+        "next_warnings": next_info["warnings"],
         "g_now_ind": g_now_ind,
         "g_next_ind": g_next_ind,
         "sp_base": sp_base,
@@ -386,7 +434,8 @@ if page == "p2":
         else:
             st.info("이직! 결과가 나와야 연봉협상 메뉴로 이동할 수 있습니다.")
 
-    with st.expander("계산 상세 보기 (SpBase, 회사 계수 등)"):
+    # ===== 계산 상세 보기: 여기서 DART 경고/데이터 없음 이유까지 보여줌 =====
+    with st.expander("계산 상세 보기 (SpBase, 회사 계수, DART 데이터 상태 등)"):
         if result:
             st.write(f"연차: `{years}` 년")
             st.write(f"현재 직종 성장률 g_now_ind: `{result['g_now_ind']:.4f}`")
@@ -397,25 +446,38 @@ if page == "p2":
 
             st.markdown("#### 현재 회사 metrics")
             st.json(result["now_metrics"])
+
+            # 🔎 현재 회사 데이터 관련 경고/안내
+            if result.get("now_warnings"):
+                st.markdown("**현재 회사 데이터 관련 안내**")
+                for w in result["now_warnings"]:
+                    st.markdown(f"- {w}")
+
             st.markdown("#### 이직 회사 metrics")
             st.json(result["next_metrics"])
+
+            # 🔎 이직 회사 데이터 관련 경고/안내
+            if result.get("next_warnings"):
+                st.markdown("**이직 회사 데이터 관련 안내**")
+                for w in result["next_warnings"]:
+                    st.markdown(f"- {w}")
+
+            st.markdown(
+                """
+                ---
+                **공식 정리**
+
+                - `SpBase = (연봉 / 100,000,000) × (1 + 산업성장률)^연차`
+                - `Wp = SpBase × 회사계수(현재 회사)`
+                - `Wk = SpBase × 회사계수(이직 회사)`
+                - 회사계수:
+                    - 성장률 컴포넌트: `1 + salesGrowth` *(없으면 산업성장률 사용)*
+                    - 규모 컴포넌트: `log10(assets) / 12`
+                    - 최종: `(1 + 성장률) × (규모 컴포넌트)`
+                """
+            )
         else:
             st.write("아직 계산된 결과가 없습니다.")
-
-        st.markdown(
-            """
-            **공식 정리**
-
-            - `SpBase = (연봉 / 100,000,000) × (1 + 산업성장률)^연차`
-            - `Wp = SpBase × 회사계수(현재 회사)`
-            - `Wk = SpBase × 회사계수(이직 회사)`
-            - 회사계수:
-                - 성장률 컴포넌트: `1 + salesGrowth` *(없으면 산업성장률 사용)*
-                - 규모 컴포넌트: `log10(assets) / 12`
-                - 최종: `(1 + 성장률) × (규모 컴포넌트)`
-            """
-        )
-
 
 # ===================== PAGE 3: 연봉협상 메뉴 =====================
 elif page == "p3":
