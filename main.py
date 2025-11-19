@@ -21,6 +21,7 @@ INDUSTRY_GROWTH = {
 }
 INDUSTRY_OPTIONS = list(INDUSTRY_GROWTH.keys())
 
+
 # ===================== 세션 상태 초기화 =====================
 if "page" not in st.session_state:
     # p2: 이직 여부 결정, p3: 연봉협상 메뉴, p5: 연봉 협상 시뮬레이터, p4: 초기 연봉 제시
@@ -28,6 +29,12 @@ if "page" not in st.session_state:
 
 if "jc_result" not in st.session_state:
     st.session_state["jc_result"] = None
+
+if "neg_result" not in st.session_state:
+    st.session_state["neg_result"] = None
+
+if "initial_offer_result" not in st.session_state:
+    st.session_state["initial_offer_result"] = None
 
 
 # ===================== 로직 함수들 =====================
@@ -161,6 +168,58 @@ def compute_job_change(
     }
 
 
+def compute_rubinstein_equilibrium(
+    min_salary: float,
+    max_salary: float,
+    delta_worker: float,
+    delta_firm: float,
+):
+    """
+    Rubinstein 모형을 이용한 연봉 협상 균형 계산.
+    - 총 파이: 회사 최대 지불 의사 연봉 - 나의 최소 수용 연봉
+    - 근로자 몫: v(δ_W, δ_F) = (1 - δ_F) / (1 - δ_W * δ_F)
+    - 균형 임금: min_salary + v * 파이
+    HTML p5 / p4에서 쓰던 이론 부분을 Python으로 옮긴 것.
+    """
+    if min_salary <= 0 or max_salary <= 0:
+        raise ValueError("연봉은 0보다 커야 합니다.")
+    if max_salary <= min_salary:
+        raise ValueError("회사 최대 지불 의사가 최소 수용 연봉보다 커야 합니다.")
+    if not (0 < delta_worker < 1) or not (0 < delta_firm < 1):
+        raise ValueError("할인 계수 δ는 0과 1 사이의 값이어야 합니다.")
+
+    pie = max_salary - min_salary
+    share_worker = (1.0 - delta_firm) / (1.0 - delta_worker * delta_firm)
+    share_worker = max(0.0, min(1.0, share_worker))  # 안전 범위 클리핑
+
+    salary_worker = min_salary + share_worker * pie
+    share_firm = 1.0 - share_worker
+    surplus_firm = max_salary - salary_worker
+
+    return {
+        "pie": pie,
+        "share_worker": share_worker,
+        "share_firm": share_firm,
+        "salary_worker": salary_worker,
+        "surplus_firm": surplus_firm,
+    }
+
+
+def format_currency(x: float) -> str:
+    """
+    연봉 숫자를 보기 좋게 포맷 (원 단위, 천 단위 콤마).
+    """
+    if not math.isfinite(x):
+        return "-"
+    return f"{int(round(x)):,} 원"
+
+
+def format_percent(x: float) -> str:
+    if not math.isfinite(x):
+        return "-"
+    return f"{x * 100:.1f}%"
+
+
 # ===================== 공통 헤더 =====================
 st.title("피이직대학 이직 상담소")
 
@@ -173,7 +232,6 @@ elif page == "p5":
     st.subheader("- 연봉 협상 시뮬레이터")
 elif page == "p4":
     st.subheader("- 초기 연봉 제시")
-
 
 st.markdown("---")
 
@@ -256,7 +314,6 @@ if page == "p2":
                 unsafe_allow_html=True,
             )
         with colB:
-            # 가운데 '결과' 박스
             decision_text = result["decision"]
             st.markdown(
                 f"""<div style="padding:16px;border-radius:12px;border:1px solid #ddd;
@@ -273,7 +330,6 @@ if page == "p2":
                 unsafe_allow_html=True,
             )
     else:
-        # 초기 상태
         with colA:
             st.markdown(
                 """<div style="padding:16px;border-radius:12px;border:1px solid #ddd;text-align:center;">
@@ -311,7 +367,7 @@ if page == "p2":
         elif decision == "계산 불가":
             st.error("지수를 계산할 수 없습니다. 입력값과 회사 데이터를 다시 확인해 주세요.")
 
-        # 🔴 여기서 중요한 부분: 이직! 버튼을 눌러야만 p3(연봉협상 메뉴)로 이동
+        # 🔴 반드시 '이직!' 버튼을 눌러야만 p3(연봉협상 메뉴)로 이동
         if decision == "이직!":
             st.success("이직 회사의 Wk가 현재 회사의 Wp보다 높게 계산되었습니다.")
             move = st.button("이직! (연봉 협상 메뉴로 이동)")
@@ -367,7 +423,7 @@ elif page == "p3":
         st.markdown(
             """<div style="padding:16px;border-radius:16px;border:1px solid #ddd;">
             <h3>연봉 협상 시뮬레이터</h3>
-            <p>라운드별 협상 플로우는 이후 추가됩니다.</p>
+            <p>Rubinstein 모형을 기반으로 균형 연봉과 협상력을 계산합니다.</p>
             </div>""",
             unsafe_allow_html=True,
         )
@@ -379,7 +435,7 @@ elif page == "p3":
         st.markdown(
             """<div style="padding:16px;border-radius:16px;border:1px solid #ddd;">
             <h3>초기 연봉 제시</h3>
-            <p>초기 제시 연봉 계산은 이후 추가됩니다.</p>
+            <p>이론상 최적 최초 제시 연봉(첫 오퍼)을 계산합니다.</p>
             </div>""",
             unsafe_allow_html=True,
         )
@@ -388,21 +444,275 @@ elif page == "p3":
             st.experimental_rerun()
 
 
-# ===================== PAGE 5: 연봉 협상 시뮬레이터 (placeholder) =====================
+# ===================== PAGE 5: 연봉 협상 시뮬레이터 =====================
 elif page == "p5":
     if st.button("뒤로 (연봉협상 메뉴로)", key="back_to_p3_from_p5"):
         st.session_state["page"] = "p3"
         st.experimental_rerun()
 
     st.markdown("### 연봉 협상 시뮬레이터")
-    st.info("협상 라운드, 제안, 응답 등의 상세 UI는 여기 추가됩니다. (HTML p5 구조 그대로 반영)")
+    st.caption(
+        "Rubinstein의 교대 제안 모형을 사용해, 나와 회사의 할인 계수(시간에 대한 인내심)에 따라 "
+        "균형 연봉과 협상력을 계산합니다."
+    )
+
+    with st.form("negotiation_form"):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            min_salary = st.number_input(
+                "나의 최소 수용 연봉 (원)",
+                min_value=1.0,
+                max_value=5_000_000_000.0,
+                value=50_000_000.0,
+                step=1_000_000.0,
+                format="%.0f",
+            )
+            delta_worker = st.slider(
+                "나의 할인 계수 δ_worker (0~1, 1에 가까울수록 인내심 ↑)",
+                min_value=0.50,
+                max_value=0.99,
+                value=0.95,
+                step=0.01,
+            )
+
+        with col2:
+            max_salary = st.number_input(
+                "회사의 최대 지불 의사 연봉 (원)",
+                min_value=1.0,
+                max_value=5_000_000_000.0,
+                value=80_000_000.0,
+                step=1_000_000.0,
+                format="%.0f",
+            )
+            delta_firm = st.slider(
+                "회사의 할인 계수 δ_firm (0~1, 1에 가까울수록 인내심 ↑)",
+                min_value=0.50,
+                max_value=0.99,
+                value=0.90,
+                step=0.01,
+            )
+
+        submitted_neg = st.form_submit_button("Rubinstein 균형 연봉 계산")
+
+    if submitted_neg:
+        try:
+            neg = compute_rubinstein_equilibrium(
+                min_salary=min_salary,
+                max_salary=max_salary,
+                delta_worker=delta_worker,
+                delta_firm=delta_firm,
+            )
+            st.session_state["neg_result"] = neg
+        except Exception as e:
+            st.error(f"오류가 발생했습니다: {e}")
+
+    neg = st.session_state["neg_result"]
+
+    if neg:
+        st.markdown("#### 계산 결과")
+
+        colA, colB, colC = st.columns(3)
+        with colA:
+            st.markdown(
+                f"""<div style="padding:16px;border-radius:12px;border:1px solid #ddd;text-align:center;">
+                균형 연봉 (근로자)<br>
+                <strong style="font-size:1.3rem;">{format_currency(neg['salary_worker'])}</strong>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+
+        with colB:
+            st.markdown(
+                f"""<div style="padding:16px;border-radius:12px;border:1px solid #ddd;text-align:center;">
+                근로자 몫 비율<br>
+                <strong style="font-size:1.3rem;">{format_percent(neg['share_worker'])}</strong>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+
+        with colC:
+            st.markdown(
+                f"""<div style="padding:16px;border-radius:12px;border:1px solid #ddd;text-align:center;">
+                회사 잔여 이득<br>
+                <strong style="font-size:1.3rem;">{format_currency(neg['surplus_firm'])}</strong>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("---")
+
+        st.markdown("#### 해석")
+        st.write(
+            f"- 총 협상 파이(회사 최대 지불 의사 연봉 - 나의 최소 수용 연봉)는 "
+            f"`{format_currency(neg['pie'])}` 입니다."
+        )
+        st.write(
+            f"- Rubinstein 균형에서 **근로자**는 파이의 약 "
+            f"**{format_percent(neg['share_worker'])}** 을 가져가며, "
+            f"이는 **{format_currency(neg['salary_worker'])}** 에 해당합니다."
+        )
+        st.write(
+            f"- **회사**는 파이의 나머지 **{format_percent(neg['share_firm'])}** 를 가져가며, "
+            f"이는 최종 연봉 지급 후 회사에 남는 여유분 **{format_currency(neg['surplus_firm'])}** 정도로 볼 수 있습니다."
+        )
+
+        with st.expander("수식 자세히 보기"):
+            st.markdown(
+                r"""
+                **Rubinstein 모형 (무한 교대 제안, 파이 크기 = `π`)**
+
+                - 근로자의 할인 계수: `δ_W`
+                - 회사의 할인 계수: `δ_F`
+                - 파이 크기: `π = 회사 최대 지불 의사 연봉 - 나의 최소 수용 연봉`
+
+                근로자의 균형 몫 비율:
+
+                \[
+                v_W(δ_W, δ_F) = \frac{1 - δ_F}{1 - δ_W δ_F}
+                \]
+
+                따라서,
+
+                \[
+                \text{균형 연봉} = \text{최소 수용 연봉} + v_W \times π
+                \]
+
+                이 모형에서는 첫 제안이 곧바로 수락되는 균형이기 때문에,
+                **이 금액이 협상 끝에 도달하는 이론상 최종 연봉**이 됩니다.
+                """
+            )
+    else:
+        st.info("위의 값을 입력하고 'Rubinstein 균형 연봉 계산' 버튼을 눌러 결과를 확인하세요.")
 
 
-# ===================== PAGE 4: 초기 연봉 제시 (placeholder) =====================
+# ===================== PAGE 4: 초기 연봉 제시 =====================
 elif page == "p4":
     if st.button("뒤로 (연봉협상 메뉴로)", key="back_to_p3_from_p4"):
         st.session_state["page"] = "p3"
         st.experimental_rerun()
 
     st.markdown("### 초기 연봉 제시")
-    st.info("초기 제시 연봉 계산 UI는 추후 완성됩니다. (HTML p4 구조 그대로 반영)")
+    st.caption(
+        "같은 Rubinstein 모형을 사용하지만, 여기서는 **첫 제안(최초 오퍼)** 의 의미에 집중합니다. "
+        "이 모형에서는 균형에서 첫 제안이 바로 수락되므로, 곧 **최초 제시 연봉 = 최종 연봉**이 됩니다."
+    )
+
+    with st.form("initial_offer_form"):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            min_salary0 = st.number_input(
+                "나의 최소 수용 연봉 (원)",
+                min_value=1.0,
+                max_value=5_000_000_000.0,
+                value=50_000_000.0,
+                step=1_000_000.0,
+                format="%.0f",
+                key="min_salary0",
+            )
+            delta_worker0 = st.slider(
+                "나의 할인 계수 δ_worker (0~1)",
+                min_value=0.50,
+                max_value=0.99,
+                value=0.95,
+                step=0.01,
+                key="delta_worker0",
+            )
+
+        with col2:
+            max_salary0 = st.number_input(
+                "회사의 최대 지불 의사 연봉 (원)",
+                min_value=1.0,
+                max_value=5_000_000_000.0,
+                value=80_000_000.0,
+                step=1_000_000.0,
+                format="%.0f",
+                key="max_salary0",
+            )
+            delta_firm0 = st.slider(
+                "회사의 할인 계수 δ_firm (0~1)",
+                min_value=0.50,
+                max_value=0.99,
+                value=0.90,
+                step=0.01,
+                key="delta_firm0",
+            )
+
+        submitted_init = st.form_submit_button("최적 최초 제시 연봉 계산")
+
+    if submitted_init:
+        try:
+            init_res = compute_rubinstein_equilibrium(
+                min_salary=min_salary0,
+                max_salary=max_salary0,
+                delta_worker=delta_worker0,
+                delta_firm=delta_firm0,
+            )
+            st.session_state["initial_offer_result"] = init_res
+        except Exception as e:
+            st.error(f"오류가 발생했습니다: {e}")
+
+    init_res = st.session_state["initial_offer_result"]
+
+    if init_res:
+        st.markdown("#### 추천 최초 제시 연봉")
+
+        st.markdown(
+            f"""<div style="padding:20px;border-radius:16px;border:2px solid #333;
+            text-align:center;background-color:#fafafa;">
+            <div style="font-size:0.9rem;margin-bottom:4px;">이론상 최적 최초 제시 연봉</div>
+            <div style="font-size:1.6rem;font-weight:bold;">
+            {format_currency(init_res['salary_worker'])}
+            </div>
+            <div style="margin-top:8px;font-size:0.9rem;color:#555;">
+            (근로자 몫 비율 기준: {format_percent(init_res['share_worker'])})
+            </div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("---")
+        st.markdown("#### 추가 설명")
+        st.write(
+            "- Rubinstein 균형에서는 **당신이 먼저 제안하는 입장**이라고 가정하면, "
+            "위에서 계산된 금액을 제시했을 때 회사가 즉시 수락하는 것이 이론상 균형입니다."
+        )
+        st.write(
+            "- 즉, 이 모형 안에서는 **최초 제시 연봉 = 최종 합의 연봉**이 되며, "
+            "실제 협상에서는 심리적 요소나 정보 비대칭 등으로 인해 약간의 조정이 필요할 수 있습니다."
+        )
+        st.write(
+            f"- 이때 회사는 이 연봉을 제시받고도 여전히 약 **{format_currency(init_res['surplus_firm'])}** "
+            "정도의 여유 여지를 남기는 것으로 해석할 수 있습니다."
+        )
+
+        with st.expander("수식 및 해석 더 보기"):
+            st.markdown(
+                r"""
+                **1. 파라미터**
+
+                - 나의 최소 수용 연봉: \( S_{\min} \)
+                - 회사의 최대 지불 의사 연봉: \( S_{\max} \)
+                - 파이 크기: \( \pi = S_{\max} - S_{\min} \)
+                - 나의 할인 계수: \( δ_W \)
+                - 회사의 할인 계수: \( δ_F \)
+
+                **2. 근로자 몫 비율**
+
+                \[
+                v_W(δ_W, δ_F) = \frac{1 - δ_F}{1 - δ_W δ_F}
+                \]
+
+                **3. 최초 제시 & 최종 연봉**
+
+                \[
+                S_0 = S^* = S_{\min} + v_W \cdot \pi
+                \]
+
+                이 모형에서는 첫 제안이 곧바로 수락되는 균형이므로,
+                **최초 제시 연봉 \(S_0\)를 이렇게 잡는 것이 이론상 최적 전략**이 됩니다.
+                """
+            )
+    else:
+        st.info("입력값을 설정한 뒤 '최적 최초 제시 연봉 계산' 버튼을 눌러 결과를 확인하세요.")
