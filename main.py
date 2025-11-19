@@ -179,7 +179,6 @@ def compute_rubinstein_equilibrium(
     - 총 파이: 회사 최대 지불 의사 연봉 - 나의 최소 수용 연봉
     - 근로자 몫: v(δ_W, δ_F) = (1 - δ_F) / (1 - δ_W * δ_F)
     - 균형 임금: min_salary + v * 파이
-    HTML p5 / p4에서 쓰던 이론 부분을 Python으로 옮긴 것.
     """
     if min_salary <= 0 or max_salary <= 0:
         raise ValueError("연봉은 0보다 커야 합니다.")
@@ -301,7 +300,7 @@ if page == "p2":
 
     result = st.session_state["jc_result"]
 
-    # 결과 박스 (HTML p2의 3개 box를 비슷하게 구성)
+    # 결과 박스
     st.markdown("#### 이직 여부 결과")
 
     colA, colB, colC = st.columns(3)
@@ -367,13 +366,13 @@ if page == "p2":
         elif decision == "계산 불가":
             st.error("지수를 계산할 수 없습니다. 입력값과 회사 데이터를 다시 확인해 주세요.")
 
-        # 🔴 반드시 '이직!' 버튼을 눌러야만 p3(연봉협상 메뉴)로 이동
+        # 반드시 '이직!' 버튼을 눌러야만 p3(연봉협상 메뉴)로 이동
         if decision == "이직!":
             st.success("이직 회사의 Wk가 현재 회사의 Wp보다 높게 계산되었습니다.")
             move = st.button("이직! (연봉 협상 메뉴로 이동)")
             if move:
                 st.session_state["page"] = "p3"
-                st.experimental_rerun()
+                st.rerun()
         else:
             st.info("이직! 결과가 나와야 연봉협상 메뉴로 이동할 수 있습니다.")
 
@@ -410,10 +409,10 @@ if page == "p2":
 
 # ===================== PAGE 3: 연봉협상 메뉴 =====================
 elif page == "p3":
-    # 뒤로 버튼 (HTML top-bar의 '뒤로')
+    # 뒤로 버튼
     if st.button("뒤로 (이직 여부 결정으로)", key="back_to_p2"):
         st.session_state["page"] = "p2"
-        st.experimental_rerun()
+        st.rerun()
 
     st.markdown("### 연봉협상 메뉴")
 
@@ -429,7 +428,7 @@ elif page == "p3":
         )
         if st.button("들어가기", key="go_p5"):
             st.session_state["page"] = "p5"
-            st.experimental_rerun()
+            st.rerun()
 
     with col2:
         st.markdown(
@@ -441,14 +440,14 @@ elif page == "p3":
         )
         if st.button("들어가기", key="go_p4"):
             st.session_state["page"] = "p4"
-            st.experimental_rerun()
+            st.rerun()
 
 
 # ===================== PAGE 5: 연봉 협상 시뮬레이터 =====================
 elif page == "p5":
     if st.button("뒤로 (연봉협상 메뉴로)", key="back_to_p3_from_p5"):
         st.session_state["page"] = "p3"
-        st.experimental_rerun()
+        st.rerun()
 
     st.markdown("### 연봉 협상 시뮬레이터")
     st.caption(
@@ -590,7 +589,7 @@ elif page == "p5":
 elif page == "p4":
     if st.button("뒤로 (연봉협상 메뉴로)", key="back_to_p3_from_p4"):
         st.session_state["page"] = "p3"
-        st.experimental_rerun()
+        st.rerun()
 
     st.markdown("### 초기 연봉 제시")
     st.caption(
