@@ -734,6 +734,219 @@ elif page == "p3":
             st.session_state["page"] = "p4"
             st.rerun()
 
+# ===================== PAGE 5: 할인율 δ_E, δ_R 기반 협상 시뮬레이터 =====================
+elif page == "p5":
+    # 🔙 연봉협상 메뉴로 돌아가기 버튼
+    if st.button("뒤로 (연봉협상 메뉴로)", key="back_to_p3_from_p5"):
+        st.session_state["page"] = "p3"
+        st.rerun()
+
+    st.markdown("### 협상 라운드 시뮬레이터 (할인율 δ 기반)")
+    st.caption(
+        "구직자 할인율 δ_E, 기업 할인율 δ_R을 기반으로 루빈스타인 균형 연봉을 계산하고,\n"
+        "회사와 구직자가 번갈아 제안/수락하는 협상 과정을 시뮬레이션합니다.\n\n"
+        "※ employer가 먼저 시작하면: 1라운드에서 회사 제안 → 수락/거절\n"
+        "※ employee가 먼저 시작하면: 사용자가 먼저 연봉 제시 → 회사가 수락/재제안"
+    )
+
+    # ---------------- 세션 초기화 ----------------
+    if "neg_state" not in st.session_state:
+        st.session_state["neg_state"] = None
+
+    neg_state = st.session_state["neg_state"]
+
+    # ---------------- 루빈스타인 균형 공식 ----------------
+    def compute_rubinstein_salary(B, E, delta_E, delta_R):
+        """
+        S* = B + v_W (E-B)
+        v_W = (1 - δ_R) / (1 - δ_E δ_R)
+        """
+        if not (0 < delta_E < 1 and 0 < delta_R < 1):
+            raise ValueError("할인율은 0과 1 사이여야 합니다.")
+
+        pie = E - B
+        v_W = (1 - delta_R) / (1 - delta_E * delta_R)
+        v_W = max(0.0, min(1.0, v_W))   # 안전 클램프
+
+        S_star = B + v_W * pie
+        return S_star, v_W, 1 - v_W
+
+    # ---------------- 회사 제안 규칙 ----------------
+    def compute_employer_offer(B, E, S_star, last_employee_offer):
+        """
+        회사는:
+        - employee 오퍼가 처음이면, 바로 S* 제안
+        - 아니면 employee 오퍼와 S*의 중간값 제안
+        """
+        S_star_clamped = max(B, min(E, S_star))
+
+        if last_employee_offer is None:
+            return S_star_clamped
+
+        offer = last_employee_offer + 0.5 * (S_star_clamped - last_employee_offer)
+        offer = max(B, min(E, offer))
+        return offer
+
+    # ---------------- 설정 폼 ----------------
+    with st.expander("🔧 협상 기본 설정", expanded=neg_state is None):
+        with st.form("neg_init_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                B = st.number_input("최소 수용 연봉 B", 1_000_000, 5_000_000_000, 50_000_000)
+                max_rounds = st.number_input("최대 라운드 수", 1, 10, 4)
+            with col2:
+                E = st.number_input("회사 최대 지불 의사 연봉 E", 1_000_000, 5_000_000_000, 80_000_000)
+                delta_E = st.slider("구직자 할인율 δ_E", 0.5, 0.99, 0.95, step=0.01)
+                delta_R = st.slider("기업 할인율 δ_R", 0.5, 0.99, 0.90, step=0.01)
+
+            first_mover = st.selectbox(
+                "첫 제안자",
+                ["employer", "employee"],
+                format_func=lambda x: "회사(employer)" if x == "employer" else "구직자(employee)",
+            )
+
+            submitted = st.form_submit_button("새 협상 시작")
+
+        if submitted:
+            if B >= E:
+                st.error("B는 E보다 작아야 합니다.")
+            else:
+                S_star, share_E, share_R = compute_rubinstein_salary(B, E, delta_E, delta_R)
+
+                st.session_state["neg_state"] = {
+                    "B": B,
+                    "E": E,
+                    "delta_E": delta_E,
+                    "delta_R": delta_R,
+                    "S_star": S_star,
+                    "share_E": share_E,
+                    "share_R": share_R,
+                    "max_rounds": int(max_rounds),
+                    "first_mover": first_mover,
+
+                    "current_round": 1,
+                    "turn": first_mover,
+                    "status": "ongoing",
+
+                    "last_employee_offer": None,
+                    "last_employer_offer": None,
+                    "final_salary": None,
+                }
+                neg_state = st.session_state["neg_state"]
+
+    # ---------------- 설정 완료 전이면 종료 ----------------
+    if neg_state is None:
+        st.info("위에서 연봉 B/E, 할인율 δ_E/δ_R 등을 설정해 주세요.")
+        st.stop()
+
+    # state unpack
+    B = neg_state["B"]
+    E = neg_state["E"]
+    delta_E = neg_state["delta_E"]
+    delta_R = neg_state["delta_R"]
+    S_star = neg_state["S_star"]
+
+    current_round = neg_state["current_round"]
+    max_rounds = neg_state["max_rounds"]
+    turn = neg_state["turn"]
+    status = neg_state["status"]
+
+    # ---------------- 현재 상태 표시 ----------------
+    st.markdown(
+        f"**라운드:** {current_round} / {max_rounds}  &nbsp;|&nbsp; "
+        f"**루빈스타인 균형 연봉 S\***: {S_star:,.0f} 원"
+    )
+    st.caption(
+        f"구직자 할인율 δ_E = {delta_E:.2f}, 기업 할인율 δ_R = {delta_R:.2f}  \n"
+        f"근로자 몫 비율 = {neg_state['share_E']:.3f}, 회사 몫 비율 = {neg_state['share_R']:.3f}"
+    )
+
+    st.markdown("---")
+
+    # ---------------- 종료 상태 ----------------
+    if status in ("success", "failed"):
+        if status == "success":
+            st.success(f"🎉 협상 성공! 최종 합의 연봉: **{neg_state['final_salary']:,.0f} 원**")
+        else:
+            st.error("❌ 협상 실패 (라운드 초과)")
+
+        if st.button("새 협상 시작하기"):
+            st.session_state["neg_state"] = None
+            st.rerun()
+        st.stop()
+
+    # ---------------- 라운드 증가 함수 ----------------
+    def next_round():
+        neg_state["current_round"] += 1
+        if neg_state["current_round"] > neg_state["max_rounds"]:
+            neg_state["status"] = "failed"
+
+    # ---------------- TURN: employer ----------------
+    if turn == "employer":
+        employer_offer = compute_employer_offer(
+            B, E, S_star, neg_state["last_employee_offer"]
+        )
+        neg_state["last_employer_offer"] = employer_offer
+
+        st.markdown("### 🏢 회사의 제안")
+        st.markdown(f"이번 라운드 회사 제안: **{employer_offer:,.0f} 원**")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("✅ 수락"):
+                neg_state["status"] = "success"
+                neg_state["final_salary"] = employer_offer
+                st.rerun()
+        with col2:
+            if st.button("❌ 거절하고 다음 라운드"):
+                next_round()
+                if neg_state["status"] == "failed":
+                    st.rerun()
+                neg_state["turn"] = "employee"
+                st.rerun()
+
+    # ---------------- TURN: employee ----------------
+    else:
+        st.markdown("### 👤 구직자의 제안")
+        st.markdown("연봉을 입력하세요. 회사가 수락 가능(B~E)이면 즉시 협상 종료됩니다.")
+
+        with st.form("employee_form"):
+            emp_offer = st.number_input(
+                "제안 연봉",
+                min_value=1_000_000,
+                max_value=5_000_000_000,
+                value=int(S_star),
+                step=1_000_000,
+            )
+            send = st.form_submit_button("제안하기")
+
+        if send:
+            neg_state["last_employee_offer"] = emp_offer
+
+            if B <= emp_offer <= E:
+                neg_state["status"] = "success"
+                neg_state["final_salary"] = emp_offer
+                st.rerun()
+            else:
+                employer_counter = compute_employer_offer(
+                    B, E, S_star, emp_offer
+                )
+                neg_state["last_employer_offer"] = employer_counter
+
+                next_round()
+                if neg_state["status"] == "failed":
+                    st.rerun()
+
+                neg_state["turn"] = "employer"
+                st.rerun()
+
+    # ---------------- 리셋 버튼 ----------------
+    st.markdown("---")
+    if st.button("🔄 초기 설정으로 돌아가기"):
+        st.session_state["neg_state"] = None
+        st.rerun()
+
+
 # ===================== PAGE 4: 초기 연봉 제시 (SPE 기반) =====================
 elif page == "p4":
     # 🔙 연봉협상 메뉴로 돌아가기 버튼
