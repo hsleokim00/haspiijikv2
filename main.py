@@ -826,7 +826,7 @@ elif page == "p5":
             sign = "높습니다" if diff_from_target > 0 else "낮습니다" if diff_from_target < 0 else "같습니다"
             diff_abs = abs(diff_from_target)
 
-          st.markdown(
+ st.markdown(
     f"""
     <div style="
         padding:14px;
@@ -864,6 +864,7 @@ elif page == "p5":
     """,
     unsafe_allow_html=True,
 )
+
 
 
             st.markdown("---")
