@@ -1159,7 +1159,7 @@ elif page == "p4":
     else:
         st.info("입력값을 설정한 뒤 'SPE 기준 최초 제시 연봉 계산' 버튼을 눌러 결과를 확인하세요.")
 
-# ===================== PAGE 4: 초기 연봉 제시 (희망 최종 연봉 → 초기 제시 연봉) =====================
+# ===================== PAGE 4: 초기 연봉 제시 (협상 후 최종 연봉 → 초기 제시 연봉) =====================
 elif page == "p4":
     # 🔙 연봉협상 메뉴로 돌아가기
     if st.button("뒤로 (연봉협상 메뉴로)", key="back_to_p3_from_p4"):
@@ -1170,7 +1170,7 @@ elif page == "p4":
     st.caption(
         "‘협상 후 최종 연봉(S*)’, ‘회사의 최대 수용 연봉(E)’, ‘라운드 수’, "
         "‘개인·기업의 할인율(δ_E, δ_R)’을 입력하면,\n"
-        "마지막 라운드 t에서 S*로 합의된다고 가정하고 t-1, t-2, ... 로 역산하여\n"
+        "마지막 라운드 t에서 S*로 합의된다고 가정하고 t-1, t-2, ... 로 역진행하여\n"
         "**협상 시작 시(첫 라운드) 제시해야 할 이상적인 초기 연봉**을 계산합니다."
     )
 
@@ -1183,8 +1183,8 @@ elif page == "p4":
     class PathState:
         round_index: int   # 0 = t(최종), -1 = t-1, -2 = t-2, ...
         proposer: PathActor
-        W_e: float         # 이 라운드에서 근로자 몫 (비율)
-        W_r: float         # 이 라운드에서 회사 몫 (비율)
+        W_e: float         # 이 라운드에서 근로자 몫 비율
+        W_r: float         # 이 라운드에서 회사 몫 비율
 
     def clamp01(x: float) -> float:
         return max(0.0, min(1.0, x))
@@ -1209,6 +1209,7 @@ elif page == "p4":
         if horizon < 0:
             raise ValueError("horizon은 0 이상이어야 합니다.")
 
+        # t 시점 (최종 라운드)
         W_e = x_target
         W_r = 1.0 - x_target
         proposer: PathActor = last_mover
@@ -1217,14 +1218,17 @@ elif page == "p4":
             PathState(round_index=0, proposer=proposer, W_e=W_e, W_r=W_r)
         ]
 
+        # t-1, t-2, ... 역산
         for step in range(1, horizon + 1):
             if proposer == "employee":
-                # 이번 라운드 제안자가 employee였다면, 그 이전(t-1)은 employer 제안 라운드
+                # 지금 라운드 제안자가 employee였다면,
+                # 바로 이전 라운드에서는 employer가 제안
                 W_r_prev = 1.0 - delta_e * W_e
                 W_e_prev = 1.0 - W_r_prev
                 proposer_prev: PathActor = "employer"
             else:
-                # 이번 라운드 제안자가 employer였다면, 그 이전(t-1)은 employee 제안 라운드
+                # 지금 라운드 제안자가 employer였다면,
+                # 바로 이전 라운드에서는 employee가 제안
                 W_e_prev = 1.0 - delta_r * W_r
                 W_r_prev = 1.0 - W_e_prev
                 proposer_prev = "employee"
@@ -1291,7 +1295,7 @@ elif page == "p4":
             )
 
         rounds = st.number_input(
-            "총 라운드 수 (왕복 횟수, 최종 t 포함)",
+            "총 라운드 수 (최종 합의 포함)",
             min_value=1,
             max_value=10,
             value=3,
@@ -1305,13 +1309,12 @@ elif page == "p4":
             if S_final >= E_max:
                 raise ValueError("협상 후 최종 연봉 S*는 회사 최대 수용 연봉 E보다 작아야 합니다.")
 
-            # 최종 라운드 t에서 근로자 몫
+            # 최종 라운드 t에서 근로자가 가져가는 몫 (파이를 E_max로 정규화)
             x_target = S_final / E_max
 
-            # 가정: 협상 시작(첫 라운드)은 employee가 제안.
-            # → 라운드 수에 따라 마지막 라운드 t의 제안자(last_mover) 결정
-            #   - 라운드 수가 홀수면: employee가 마지막 제안
-            #   - 라운드 수가 짝수면: employer가 마지막 제안
+            # 가정: 협상 시작(라운드 1)은 employee가 제안.
+            # 라운드 1: employee, 2: employer, 3: employee ...
+            # → rounds가 홀수면 t 라운드 제안자는 employee, 짝수면 employer
             if rounds % 2 == 1:
                 last_mover: PathActor = "employee"
             else:
@@ -1397,8 +1400,8 @@ elif page == "p4":
         with st.expander("계산 아이디어 설명"):
             st.markdown(
                 r"""
-                - 사용자가 입력한 \( S^* \) 를 **마지막 라운드 t에서의 합의 연봉**이라고 봅니다.  
-                  이때 전체 파이를 회사 최대수용 연봉 \( E \) 로 두고,
+                - 사용자가 입력한 \( S^* \) 를 **마지막 라운드 t에서의 합의 연봉**이라고 둡니다.  
+                  이때 전체 파이를 회사 최대 수용 연봉 \( E \) 로 두고,
                   근로자 몫은 \( x_t = S^*/E \) 가 됩니다.
                 - 할인율 \( \delta_E, \delta_R \) 을 이용해
                   t, t−1, t−2, ... 의 근로자/기업 몫을
@@ -1418,7 +1421,11 @@ elif page == "p4":
                 """
             )
     else:
-        st.info("‘협상 후 최종 연봉’, ‘회사 최대 수용 연봉’, ‘라운드 수’, ‘개인·기업 할인율’을 설정한 뒤 계산 버튼을 눌러주세요.")
+        st.info(
+            "‘협상 후 최종 연봉’, ‘회사 최대 수용 연봉’, ‘라운드 수’, "
+            "‘개인·기업 할인율’을 설정한 뒤 계산 버튼을 눌러주세요."
+        )
+
 
 # ===================== (아래 클래스들은 건드리지 않고 그대로 둠) ====================
 Actor = Literal["employee", "employer"]
