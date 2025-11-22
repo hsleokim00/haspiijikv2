@@ -272,14 +272,6 @@ def fetch_corp_metrics(name: str) -> dict:
     """
     회사 데이터를 가져오되, 어떤 오류가 나도 스트림릿 앱이 죽지 않도록
     전부 try/except로 감싼 안전 버전.
-    - 반환 형식:
-      {
-        "metrics": {...},    # 실제 숫자들 (없으면 {})
-        "warnings": [...],   # DART/Worker에서 온 경고·설명 메시지
-        "debug": {...},      # 연도별 성공/실패 정보
-        "ok": True/False,    # Worker의 ok 플래그
-        "error": "..."       # Worker의 error (있다면)
-      }
     """
     corp = (name or "").strip()
     if not corp:
@@ -295,7 +287,6 @@ def fetch_corp_metrics(name: str) -> dict:
         url = f"{API_BASE}?corp={requests.utils.quote(corp)}"
         res = requests.get(url, timeout=10)
 
-        # HTTP 상태코드가 200이 아니면, 이유를 warnings에 남김
         if not res.ok:
             msg = f"회사 데이터 API 호출 실패 (HTTP {res.status_code}). DART 응답을 가져오지 못했습니다."
             return {
@@ -308,7 +299,6 @@ def fetch_corp_metrics(name: str) -> dict:
 
         data = res.json()
     except Exception as e:
-        # 네트워크 오류, JSON 파싱 오류 포함 모든 예외를 여기서 흡수
         msg = f"회사 데이터를 불러오는 중 오류가 발생했습니다: {e}"
         return {
             "metrics": {},
@@ -321,14 +311,12 @@ def fetch_corp_metrics(name: str) -> dict:
     ok = bool(data.get("ok"))
     metrics = data.get("metrics") or {}
 
-    # Worker에서 내려준 warnings를 최대한 살려서 보여줌
     warnings = []
     if isinstance(data.get("warnings"), list):
         for w in data["warnings"]:
             if w:
                 warnings.append(str(w))
 
-    # ok=False 인 경우 error 메시지도 warnings에 추가
     if not ok:
         err_msg = data.get("error") or "회사 데이터를 가져오지 못했습니다."
         warnings.append(str(err_msg))
@@ -343,9 +331,7 @@ def fetch_corp_metrics(name: str) -> dict:
 
 
 def get_industry_growth(industry: str) -> float:
-    """
-    산업별 성장률 가져오기. 없는 경우 3% 기본값.
-    """
+    """산업별 성장률 가져오기. 없는 경우 3% 기본값."""
     return INDUSTRY_GROWTH.get(industry, 0.03)
 
 
@@ -361,10 +347,8 @@ def company_factor(metrics: dict, industry_growth_fallback: float) -> float:
     else:
         sg = float(industry_growth_fallback)
 
-    # 성장률 컴포넌트
     growth_component = 1.0 + sg
 
-    # 자산(규모) 컴포넌트
     size_component = 1.0
     assets = metrics.get("assets")
     if isinstance(assets, (int, float)) and assets > 0:
@@ -375,9 +359,7 @@ def company_factor(metrics: dict, industry_growth_fallback: float) -> float:
 
 
 def format_score(x: float) -> str:
-    """
-    점수 포맷: 소수 둘째 자리까지 (HTML의 toFixed(2) 대응).
-    """
+    """점수 포맷: 소수 둘째 자리까지."""
     if not math.isfinite(x):
         return "-"
     return f"{x:.2f}"
@@ -393,7 +375,6 @@ def compute_job_change(
 ):
     """
     HTML 2페이지(이직 여부 결정)에서 하던 Wp/Wk 계산.
-    DART/Worker에서 오는 경고 메시지도 함께 결과에 담는다.
     """
     if not current_industry or not target_industry:
         raise ValueError("현재 직종과 이직 고려 직종을 모두 선택해야 합니다.")
@@ -404,30 +385,24 @@ def compute_job_change(
     if not current_corp.strip() or not next_corp.strip():
         raise ValueError("현재 기업과 이직 고려 기업명을 모두 입력해야 합니다.")
 
-    # 회사 metrics + warnings 조회
     now_info = fetch_corp_metrics(current_corp)
     next_info = fetch_corp_metrics(next_corp)
 
     now_metrics = now_info["metrics"]
     next_metrics = next_info["metrics"]
 
-    # 산업 성장률
     g_now_ind = get_industry_growth(current_industry)
     g_next_ind = get_industry_growth(target_industry)
 
-    # SpBase 계산: (연봉 / 1억) × (1+산업성장률)^연차
     salary_scale = salary / 100_000_000  # 1억 기준
     sp_base = salary_scale * ((1.0 + g_now_ind) ** years)
 
-    # 회사 계수
     factor_now = company_factor(now_metrics, g_now_ind)
     factor_next = company_factor(next_metrics, g_next_ind)
 
-    # 최종 지수
-    wp = sp_base * factor_now   # 현재 회사 Wp
-    wk = sp_base * factor_next  # 이직 고려 Wk
+    wp = sp_base * factor_now
+    wk = sp_base * factor_next
 
-    # 의사결정
     if math.isfinite(wp) and math.isfinite(wk):
         if wk > wp:
             decision = "이직!"
@@ -464,9 +439,6 @@ def compute_rubinstein_equilibrium(
 ):
     """
     Rubinstein 모형을 이용한 연봉 협상 균형 계산.
-    - 총 파이: 회사 최대 지불 의사 연봉 - 나의 최소 수용 연봉
-    - 근로자 몫: v(δ_W, δ_F) = (1 - δ_F) / (1 - δ_W * δ_F)
-    - 균형 임금: min_salary + v * 파이
     """
     if min_salary <= 0 or max_salary <= 0:
         raise ValueError("연봉은 0보다 커야 합니다.")
@@ -477,7 +449,7 @@ def compute_rubinstein_equilibrium(
 
     pie = max_salary - min_salary
     share_worker = (1.0 - delta_firm) / (1.0 - delta_worker * delta_firm)
-    share_worker = max(0.0, min(1.0, share_worker))  # 안전 범위 클리핑
+    share_worker = max(0.0, min(1.0, share_worker))
 
     salary_worker = min_salary + share_worker * pie
     share_firm = 1.0 - share_worker
@@ -493,9 +465,7 @@ def compute_rubinstein_equilibrium(
 
 
 def format_currency(x: float) -> str:
-    """
-    연봉 숫자를 보기 좋게 포맷 (원 단위, 천 단위 콤마).
-    """
+    """연봉 숫자 포맷 (원 단위, 천 단위 콤마)."""
     if not math.isfinite(x):
         return "-"
     return f"{int(round(x)):,} 원"
@@ -568,7 +538,6 @@ if page == "p2":
 
         calc_submit = st.form_submit_button("계산")
 
-    # 계산 버튼 눌렀을 때만 새로 계산
     if calc_submit:
         if not current_corp or not next_corp:
             st.error("현재 기업과 이직 기업을 모두 입력해 주세요.")
@@ -588,7 +557,6 @@ if page == "p2":
 
     result = st.session_state["jc_result"]
 
-    # 결과 박스
     st.markdown("#### 이직 여부 결과")
 
     colA, colB, colC = st.columns(3)
@@ -640,7 +608,6 @@ if page == "p2":
                 unsafe_allow_html=True,
             )
 
-    # 의사결정 및 추가 메시지 / 이직 버튼
     if result:
         decision = result["decision"]
 
@@ -654,7 +621,6 @@ if page == "p2":
         elif decision == "계산 불가":
             st.error("지수를 계산할 수 없습니다. 입력값과 회사 데이터를 다시 확인해 주세요.")
 
-        # 반드시 '이직!' 버튼을 눌러야만 p3(연봉협상 메뉴)로 이동
         if decision == "이직!":
             st.success("이직 회사의 Wk가 현재 회사의 Wp보다 높게 계산되었습니다.")
             move = st.button("이직! (연봉 협상 메뉴로 이동)")
@@ -664,7 +630,6 @@ if page == "p2":
         else:
             st.info("이직! 결과가 나와야 연봉협상 메뉴로 이동할 수 있습니다.")
 
-    # ===== 계산 상세 보기: 여기서 DART 경고/데이터 없음 이유까지 보여줌 =====
     with st.expander("계산 상세 보기 (SpBase, 회사 계수, DART 데이터 상태 등)"):
         if result:
             st.write(f"연차: `{years}` 년")
@@ -677,7 +642,6 @@ if page == "p2":
             st.markdown("#### 현재 회사 metrics")
             st.json(result["now_metrics"])
 
-            # 🔎 현재 회사 데이터 관련 경고/안내
             if result.get("now_warnings"):
                 st.markdown("**현재 회사 데이터 관련 안내**")
                 for w in result["now_warnings"]:
@@ -686,7 +650,6 @@ if page == "p2":
             st.markdown("#### 이직 회사 metrics")
             st.json(result["next_metrics"])
 
-            # 🔎 이직 회사 데이터 관련 경고/안내
             if result.get("next_warnings"):
                 st.markdown("**이직 회사 데이터 관련 안내**")
                 for w in result["next_warnings"]:
@@ -709,9 +672,9 @@ if page == "p2":
         else:
             st.write("아직 계산된 결과가 없습니다.")
 
+
 # ===================== PAGE 3: 연봉협상 메뉴 =====================
 elif page == "p3":
-    # 뒤로 버튼
     if st.button("뒤로 (이직 여부 결정으로)", key="back_to_p2"):
         st.session_state["page"] = "p2"
         st.rerun()
@@ -724,7 +687,7 @@ elif page == "p3":
         st.markdown(
             """<div style="padding:16px;border-radius:16px;border:1px solid #ddd;">
             <h3>연봉 협상 시뮬레이터</h3>
-            <p>Rubinstein 모형 + 협상 라운드를 기반으로, 실제 왔다갔다를 체험해 볼 수 있습니다.</p>
+            <p>회사 제안 → 나의 응답을 라운드별로 돌려보며 협상을 연습합니다.</p>
             </div>""",
             unsafe_allow_html=True,
         )
@@ -748,42 +711,42 @@ elif page == "p3":
 # ===================== PAGE 5: 왔다갔다 협상 라운드 시뮬레이터 =====================
 elif page == "p5":
 
-    # 뒤로 버튼
     if st.button("뒤로 (연봉협상 메뉴로)", key="back_to_p3_from_p5"):
         st.session_state["page"] = "p3"
         st.rerun()
 
-    st.markdown("### 협상 라운드 시뮬레이터 (NegotiationModel 기반)")
+    st.markdown("### 협상 라운드 시뮬레이터")
     st.caption(
-        "t-3 → t-2 → t-1 → t 구조의 교대 제안 협상을, "
-        "실제 '회사 오퍼 입력 → 내 제안 계산' 방식으로 왔다갔다 해볼 수 있습니다."
+        "1단계에서 협상 조건을 정하고, 2단계에서 "
+        "'회사 제안 → 나의 응답'을 번갈아 입력하면서 협상 과정을 연습해 봅니다."
     )
 
-    # ---- 1. 협상 파라미터 설정 (한 번 세팅 후, 라운드별로 반복 사용) ----
+    # ---- 1. 협상 파라미터 설정 ----
     with st.form("neg_setting_form"):
-        st.markdown("#### 1단계: 협상 기본 조건 설정")
+        st.markdown("#### 1단계: 이번 협상 판 설정하기")
 
         col1, col2 = st.columns(2)
         with col1:
-            B = st.number_input("나의 최소 수용 연봉 B (원)", 1_000_000, 1_000_000_000, 50_000_000)
-            S = st.number_input("목표(희망) 최종 연봉 S (원)", 1_000_000, 1_000_000_000, 65_000_000)
+            B = st.number_input("나의 최소 수용 연봉 B (이것보다 낮으면 절대 수락 X)", 1_000_000, 1_000_000_000, 50_000_000)
+            S = st.number_input("내가 최종적으로 받고 싶은 목표 연봉 S", 1_000_000, 1_000_000_000, 65_000_000)
         with col2:
-            E = st.number_input("회사의 최대 지불 의사 연봉 E (원)", 1_000_000, 1_000_000_000, 80_000_000)
-            total_rounds = st.number_input("총 협상 라운드 수", 1, 10, 4)
+            E = st.number_input("회사가 최대한 줄 수 있다고 보는 상한 E", 1_000_000, 1_000_000_000, 80_000_000)
+            total_rounds = st.number_input("최대 몇 번까지 왔다갔다 할 건가요? (라운드 수)", 1, 10, 4)
 
         col3, col4 = st.columns(2)
         with col3:
-            delta_e = st.slider("구직자 할인율 δ_E", 0.5, 0.99, 0.95, step=0.01)
+            delta_e = st.slider("내 인내심 (구직자 할인율 δ_E)", 0.5, 0.99, 0.95, step=0.01,
+                                 help="1에 가까울수록 '기다려도 된다' / 낮을수록 '빨리 합의 보고 싶다'")
         with col4:
-            delta_r = st.slider("고용주 할인율 δ_R", 0.5, 0.99, 0.90, step=0.01)
+            delta_r = st.slider("회사 인내심 (고용주 할인율 δ_R)", 0.5, 0.99, 0.90, step=0.01,
+                                 help="1에 가까울수록 회사도 느긋함, 낮을수록 빨리 합의 원함")
 
-        first = st.selectbox("첫 제안자는 누구인가?", ["employee", "employer"])
+        first = st.selectbox("이번 협상에서 누가 먼저 말을 꺼내나요?", ["employer", "employee"])
 
-        submitted = st.form_submit_button("협상 모델 초기화")
+        submitted = st.form_submit_button("협상 시작 (모델 초기화)")
 
     if submitted:
         try:
-            # field_name은 'custom'으로 두고, E_table에 직접 E를 넣어줌
             model = NegotiationModel(
                 S=S,
                 B=B,
@@ -797,39 +760,41 @@ elif page == "p5":
             st.session_state["neg_model"] = model
             st.session_state["neg_params"] = {"B": float(B), "S": float(S), "E": float(E)}
             st.session_state["neg_last_offer"] = None
-            st.session_state["neg_history"] = []  # optional: 나중에 커스텀 로그용
-            st.success("협상 모델이 초기화되었습니다. 아래에서 라운드를 진행해 보세요.")
+            st.session_state["neg_history"] = []  # [{round, who, offer} ...]
+            st.success("협상 판이 세팅되었습니다. 아래에서 라운드를 진행해 보세요.")
         except Exception as e:
             st.error(f"모델 초기화 중 오류가 발생했습니다: {e}")
 
-    # ---- 2. 협상 라운드 진행 (왔다갔다) ----
+    # ---- 2. 협상 라운드 진행 ----
     model: Optional[NegotiationModel] = st.session_state.get("neg_model")
 
     if model is None:
-        st.info("위에서 협상 기본 조건을 설정하고 '협상 모델 초기화' 버튼을 눌러주세요.")
+        st.info("위에서 협상 조건을 입력하고 '협상 시작 (모델 초기화)' 버튼을 먼저 눌러주세요.")
     else:
         params = st.session_state.get("neg_params") or {}
         B_val = params.get("B", model.state.B)
         E_val = params.get("E", model.state.E_max)
 
-        st.markdown("#### 2단계: 라운드별 왔다갔다 진행")
-
-        # 현재 상태 요약
-        st.code(model.summary(), language="text")
+        st.markdown("#### 2단계: 라운드별로 협상 진행하기")
 
         s = model.state
+        st.code(model.summary(), language="text")
 
         if s.current_round > s.total_rounds:
-            st.warning("모든 라운드가 종료되었습니다. 위에서 다시 모델을 초기화해 주세요.")
+            st.warning("설정한 라운드 수를 모두 사용했습니다. 위에서 협상을 다시 시작해 주세요.")
         else:
             current = model.current_player()
             st.markdown(f"**현재 라운드:** {s.current_round} / {s.total_rounds}")
-            st.markdown(f"**이번 차례:** `{current}`")
+            st.markdown(f"**지금 먼저 말할 차례인 쪽:** `{current}`")
 
-            # 고용주 차례인 경우: 오퍼 입력 → 내 제안까지 한 번에 계산
+            st.markdown("---")
+
             if current == "employer":
+                st.markdown("##### 이번 차례: 회사가 연봉을 먼저 제안")
+                st.caption("실제 회사가 제시했다고 가정하는 금액을 입력해 보세요. 그 다음, 이 금액을 보고 내가 얼마를 제안해야 할지 계산합니다.")
+
                 employer_offer = st.number_input(
-                    "이번 라운드에서 회사(고용주)가 제시한 연봉 (원)",
+                    "이번 라운드에서 회사가 제시한 연봉",
                     min_value=float(B_val),
                     max_value=float(E_val),
                     value=float(S),
@@ -838,47 +803,78 @@ elif page == "p5":
                     key="employer_offer_input",
                 )
 
-                if st.button("고용주 오퍼 반영 + 내 제안 계산", key="btn_step_with_employer"):
+                if st.button("이번 라운드 진행 (회사 제안 → 나의 응답 보기)", key="btn_step_with_employer"):
                     try:
                         my_offer = model.next_employee_offer(employer_offer=float(employer_offer))
                         st.session_state["neg_last_offer"] = my_offer
+
+                        # 라운드 번호는 회사 기준으로 기록
+                        round_no = len(st.session_state["neg_history"]) + 1
                         st.session_state["neg_history"].append(
-                            {"round": s.current_round - 1, "who": "employee", "offer": my_offer}
+                            {"round": round_no, "who": "employer", "offer": float(employer_offer)}
                         )
-                        st.success(f"이번 라운드에서 추천되는 나의 제안: {my_offer:,.0f} 원")
+                        st.session_state["neg_history"].append(
+                            {"round": round_no, "who": "employee", "offer": float(my_offer)}
+                        )
+
+                        st.success(
+                            f"📌 회사 제안: {employer_offer:,.0f} 원\n\n"
+                            f"👉 이 금액을 보고, 이번 라운드에서 내가 제안하면 좋은 금액은 "
+                            f"**{my_offer:,.0f} 원** 입니다."
+                        )
                         st.rerun()
                     except Exception as e:
                         st.error(f"라운드 계산 중 오류가 발생했습니다: {e}")
 
-            # 구직자 차례인 경우: 고용주 오퍼 없이 내 제안만 계산
             else:
-                st.info("지금은 구직자(employee)의 제안 차례입니다.")
-                if st.button("내 제안 계산하기", key="btn_step_employee_only"):
+                st.markdown("##### 이번 차례: 내가 먼저 연봉을 제안")
+                st.caption("직전에 회사 제안이 없다고 가정하고, 지금 상황에서 내가 먼저 얼마를 제안하면 좋을지 계산합니다.")
+
+                if st.button("이번 라운드 진행 (나의 제안 계산)", key="btn_step_employee_only"):
                     try:
                         my_offer = model.next_employee_offer(employer_offer=None)
                         st.session_state["neg_last_offer"] = my_offer
+
+                        round_no = len(st.session_state["neg_history"]) + 1
                         st.session_state["neg_history"].append(
-                            {"round": s.current_round - 1, "who": "employee", "offer": my_offer}
+                            {"round": round_no, "who": "employee", "offer": float(my_offer)}
                         )
-                        st.success(f"이번 라운드에서 추천되는 나의 제안: {my_offer:,.0f} 원")
+
+                        st.success(
+                            f"👉 이번 라운드에서 내가 먼저 제안하면 좋은 금액은 "
+                            f"**{my_offer:,.0f} 원** 입니다."
+                        )
                         st.rerun()
                     except Exception as e:
                         st.error(f"라운드 계산 중 오류가 발생했습니다: {e}")
 
-        # 마지막 제안 표시
         last_offer = st.session_state.get("neg_last_offer")
         if last_offer is not None:
             st.markdown("---")
             st.markdown(
-                f"#### 💰 직전 라운드에서 추천된 나의 제안\n"
+                f"#### 🔎 가장 최근에 추천된 나의 제안\n"
                 f"**{last_offer:,.0f} 원**"
             )
 
-        # 양쪽 히스토리 간단 요약
         st.markdown("---")
-        st.markdown("#### 히스토리 (구직자/고용주 제안 값)")
-        st.write("**구직자 제안 히스토리:**", model.state.history_employee)
-        st.write("**고용주 제안 히스토리:**", model.state.history_employer)
+        st.markdown("#### 전체 협상 기록 (라운드별)")
+
+        history = st.session_state.get("neg_history") or []
+        if not history:
+            st.write("아직 진행된 라운드가 없습니다.")
+        else:
+            # 라운드별로 묶어서 보기 좋게 테이블 구성
+            table_rows = []
+            for h in history:
+                role = "나 (구직자)" if h["who"] == "employee" else "회사"
+                table_rows.append(
+                    [
+                        h["round"],
+                        role,
+                        f"{h['offer']:,.0f} 원",
+                    ]
+                )
+            st.table(table_rows)
 
 
 # ===================== PAGE 4: 초기 연봉 제시 =====================
@@ -1041,17 +1037,14 @@ class SalaryBargainingGame:
     first_mover: Actor       # 협상 시작 시 첫 제안자
     horizon: int = 3         # t 기준으로 몇 단계 앞에서 시작할지 (t-3, t-4 등)
 
-    # 관찰된 오퍼를 저장(나중에 δ 추정에 활용)
     offer_history: List[Dict] = field(default_factory=list)
 
-    # ----- 기본 유효성 검사 -----
     def __post_init__(self) -> None:
         if not (self.B < self.S <= self.E):
             raise ValueError("B < S ≤ E 관계가 성립해야 합니다.")
         if not (0 < self.delta_e <= 1 and 0 < self.delta_r <= 1):
             raise ValueError("할인율(delta_e, delta_r)은 0과 1 사이여야 합니다.")
 
-    # ----- 편의 속성 -----
     @property
     def pie(self) -> float:
         """협상의 전체 파이 π = E - B"""
@@ -1059,23 +1052,17 @@ class SalaryBargainingGame:
 
     @property
     def x_target(self) -> float:
-        """
-        최종 시점 t에서 구직자가 가져가고자 하는 파이의 비율 x.
-        사진에서 x = (S - B) / π.
-        """
+        """최종 시점 t에서 구직자가 가져가고자 하는 파이의 비율 x."""
         return (self.S - self.B) / self.pie
 
-    # ----- 핵심: 뒤로 거슬러 올라가며 균형 share 계산 -----
     def compute_equilibrium_path(
         self,
         last_mover: Actor = "employee",
     ) -> List[RoundState]:
         """
         t 시점(라운드 index=0)의 구직자 몫을 x_target으로 놓고,
-        사진에 있는 재귀식(교대로 1 - δ * 상대 몫)을 사용해서
-        t-1, t-2, ... 까지 W_e, W_r를 역산한다.
+        교대로 1 - δ * 상대 몫을 적용해 t-1, t-2 ... 를 역산.
         """
-        # 마지막 라운드 t에서의 몫 (사진: W_E(t) = x)
         W_e = self.x_target
         W_r = 1.0 - W_e
         states: List[RoundState] = [
@@ -1084,17 +1071,12 @@ class SalaryBargainingGame:
 
         proposer = last_mover
 
-        # horizon 단계만큼 t-1, t-2 ... 를 역산
         for step in range(1, self.horizon + 1):
             if proposer == "employee":
-                # 바로 이전 라운드에서는 고용주가 제안
-                # WR_prev = 1 - δ_E * WE_next
                 W_r_prev = 1.0 - self.delta_e * W_e
                 W_e_prev = 1.0 - W_r_prev
                 proposer_prev: Actor = "employer"
             else:
-                # 바로 이전 라운드에서는 구직자가 제안
-                # WE_prev = 1 - δ_R * WR_next
                 W_e_prev = 1.0 - self.delta_r * W_r
                 W_r_prev = 1.0 - W_e_prev
                 proposer_prev = "employee"
@@ -1108,50 +1090,38 @@ class SalaryBargainingGame:
                 )
             )
 
-            # 다음 step을 위해 업데이트
             W_e, W_r, proposer = W_e_prev, W_r_prev, proposer_prev
 
-        # round_index 기준으로 정렬 (t-3, t-2, t-1, t 순)
         states.sort(key=lambda s: s.round_index)
         return states
 
-    # ----- 지금 라운드에서 연봉 제안 추천 -----
     def recommend_employee_offer(
         self,
         current_round_index: int,
         current_proposer: Actor,
     ) -> float:
         """
-        current_round_index: t 기준 상대 index (예: t-3 -> -3, t-1 -> -1, t -> 0)
-        current_proposer: 현재 제안하는 쪽 ("employee" 또는 "employer")
-
-        반환값: 구직자가 '지금' 제안해야 할 연봉 (현재가 구직자 차례일 때).
-        지금은 고용주 차례라면, 다음에 구직자가 제안할 때의 추천 연봉을 반환.
+        current_round_index 기준으로, 지금 또는 다음 employee 차례의 추천 연봉.
         """
-        path = self.compute_equilibrium_path(
-            last_mover="employee"  # 사진 구조: t에서 구직자가 제안
-        )
+        path = self.compute_equilibrium_path(last_mover="employee")
 
-        # path에서 현재 또는 다음 구직자 차례 찾기
         if current_proposer == "employee":
             candidate = max(
-                (st for st in path if st.round_index == current_round_index),
-                key=lambda st: st.round_index,
+                (stt for stt in path if stt.round_index == current_round_index),
+                key=lambda stt: stt.round_index,
             )
         else:
-            # 지금은 고용주 차례 → 그 다음 구직자 차례
             candidate = max(
-                (st for st in path
-                 if st.round_index >= current_round_index
-                 and st.proposer == "employee"),
-                key=lambda st: st.round_index,
+                (stt for stt in path
+                 if stt.round_index >= current_round_index
+                 and stt.proposer == "employee"),
+                key=lambda stt: stt.round_index,
             )
 
         W_e_now = candidate.W_e
         suggested_salary = self.B + self.pie * W_e_now
         return suggested_salary
 
-    # ----- 관찰된 오퍼 기록 (나중에 δ 추정용) -----
     def record_offer(self, proposer: Actor, salary: float, round_index: int) -> None:
         self.offer_history.append(
             {
@@ -1163,8 +1133,5 @@ class SalaryBargainingGame:
         )
 
     def update_deltas_from_history(self) -> None:
-        """
-        TODO: 고용주 오퍼들을 바탕으로 delta_e, delta_r를
-        추정/업데이트하는 로직을 나중에 여기에 구현.
-        """
+        """TODO: 히스토리를 기반으로 delta_e, delta_r 업데이트 로직."""
         pass
