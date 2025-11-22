@@ -1159,36 +1159,107 @@ elif page == "p4":
     else:
         st.info("입력값을 설정한 뒤 'SPE 기준 최초 제시 연봉 계산' 버튼을 눌러 결과를 확인하세요.")
 
-# ===================== PAGE 4: 초기 연봉 제시 (B 기반 SPE 계산) =====================
+# ===================== PAGE 4: 초기 연봉 제시 (희망 최종 연봉 → 초기 제시 연봉) =====================
 elif page == "p4":
     # 🔙 연봉협상 메뉴로 돌아가기
     if st.button("뒤로 (연봉협상 메뉴로)", key="back_to_p3_from_p4"):
         st.session_state["page"] = "p3"
         st.rerun()
 
-    st.markdown("### 초기 연봉 제시 (루빈스타인 SPE 기반)")
+    st.markdown("### 초기 연봉 제시 (역진행 SPE 스타일)")
     st.caption(
-        "나의 최소 수용 연봉 B, 회사가 지불할 수 있는 최대 연봉 E, "
+        "희망하는 최종 연봉 S*, 회사가 제시할 수 있는 최대 연봉 E, "
         "구직자/기업의 할인율(δ_E, δ_R)을 입력하면\n"
-        "루빈스타인 모형의 균형(SPE)에 따라 **최초 제시 연봉(=최종 합의 연봉)**을 계산합니다."
+        "마지막 라운드(t)에서 S*로 합의된다고 가정하고, "
+        "t-1, t-2, t-3로 역진행해 **첫 라운드에서 제시할 초기 연봉**을 계산합니다."
     )
+
+    from dataclasses import dataclass
+    from typing import Literal, List
+
+    Actor = Literal["employee", "employer"]
+
+    @dataclass
+    class RoundState:
+        round_index: int   # 0 = t(최종), -1 = t-1, -2 = t-2, ...
+        proposer: Actor
+        W_e: float         # 해당 라운드에서 근로자 몫
+        W_r: float         # 해당 라운드에서 회사 몫
+
+    def clamp01(x: float) -> float:
+        return max(0.0, min(1.0, x))
+
+    def compute_path_from_final_share(
+        x_target: float,
+        delta_e: float,
+        delta_r: float,
+        horizon: int = 3,
+        last_mover: Actor = "employer",
+    ) -> List[RoundState]:
+        """
+        마지막 라운드 t에서 근로자 몫 x_target으로 합의된다고 가정하고,
+        t-1, t-2, ... 로 역진행해 각 라운드의 균형 몫을 계산.
+        """
+        if not (0.0 < x_target < 1.0):
+            raise ValueError("S* / E 는 0과 1 사이여야 합니다.")
+        if not (0.0 < delta_e < 1.0 and 0.0 < delta_r < 1.0):
+            raise ValueError("할인율 δ_E, δ_R은 0과 1 사이여야 합니다.")
+
+        W_e = x_target
+        W_r = 1.0 - x_target
+        proposer: Actor = last_mover
+
+        states: List[RoundState] = [
+            RoundState(round_index=0, proposer=proposer, W_e=W_e, W_r=W_r)
+        ]
+
+        for step in range(1, horizon + 1):
+            if proposer == "employee":
+                # 이번 라운드 제안자가 employee였으면, 바로 이전 라운드는 employer 제안 라운드
+                W_r_prev = 1.0 - delta_e * W_e
+                W_e_prev = 1.0 - W_r_prev
+                proposer_prev: Actor = "employer"
+            else:
+                # 이번 라운드 제안자가 employer였으면, 바로 이전 라운드는 employee 제안 라운드
+                W_e_prev = 1.0 - delta_r * W_r
+                W_r_prev = 1.0 - W_e_prev
+                proposer_prev = "employee"
+
+            W_e_prev = clamp01(W_e_prev)
+            W_r_prev = clamp01(W_r_prev)
+
+            states.append(
+                RoundState(
+                    round_index=-step,
+                    proposer=proposer_prev,
+                    W_e=W_e_prev,
+                    W_r=W_r_prev,
+                )
+            )
+
+            W_e, W_r, proposer = W_e_prev, W_r_prev, proposer_prev
+
+        states.sort(key=lambda s: s.round_index)
+        return states
 
     # 결과 저장용
     if "initial_offer_result" not in st.session_state:
         st.session_state["initial_offer_result"] = None
+    if "initial_offer_path" not in st.session_state:
+        st.session_state["initial_offer_path"] = None
 
-    with st.form("initial_offer_form_B"):
+    # ---- 입력 폼: S*, E, δ_E, δ_R ----
+    with st.form("initial_offer_form_from_S"):
         col1, col2 = st.columns(2)
 
         with col1:
-            min_salary0 = st.number_input(
-                "나의 최소 수용 연봉 B (원)",
-                min_value=1.0,
+            S_target = st.number_input(
+                "희망하는 최종 연봉 S* (원)",
+                min_value=1_000_000.0,
                 max_value=5_000_000_000.0,
-                value=50_000_000.0,
+                value=70_000_000.0,
                 step=1_000_000.0,
                 format="%.0f",
-                key="min_salary0",
             )
             delta_worker0 = st.slider(
                 "구직자 할인율 δ_E",
@@ -1196,18 +1267,16 @@ elif page == "p4":
                 max_value=0.99,
                 value=0.95,
                 step=0.01,
-                key="delta_worker0",
             )
 
         with col2:
-            max_salary0 = st.number_input(
-                "회사의 최대 지불 의사 연봉 E (원)",
-                min_value=1.0,
+            E_max0 = st.number_input(
+                "회사가 오퍼할 수 있는 최대 연봉 E (원)",
+                min_value=1_000_000.0,
                 max_value=5_000_000_000.0,
-                value=80_000_000.0,
+                value=90_000_000.0,
                 step=1_000_000.0,
                 format="%.0f",
-                key="max_salary0",
             )
             delta_firm0 = st.slider(
                 "기업 할인율 δ_R",
@@ -1215,31 +1284,56 @@ elif page == "p4":
                 max_value=0.99,
                 value=0.90,
                 step=0.01,
-                key="delta_firm0",
             )
 
-        submitted_init = st.form_submit_button("SPE 기준 최초 제시 연봉 계산")
+        submitted_init = st.form_submit_button("초기 제시 연봉 계산")
 
     if submitted_init:
         try:
-            # 🔹 여기서 위쪽에 이미 정의된 루빈스타인 함수 사용
-            init_res = compute_rubinstein_equilibrium(
-                min_salary=min_salary0,
-                max_salary=max_salary0,
-                delta_worker=delta_worker0,
-                delta_firm=delta_firm0,
+            if S_target >= E_max0:
+                raise ValueError("희망 최종 연봉 S*는 회사 최대 연봉 E보다 작아야 합니다.")
+
+            # 최종 라운드 t에서의 근로자 몫 (기준: 파이 = E, B=0 가정)
+            x_target = S_target / E_max0
+
+            # t가 employer 제안 라운드라고 가정 (t-1 employee, t-2 employer, t-3 employee ...)
+            path = compute_path_from_final_share(
+                x_target=x_target,
+                delta_e=delta_worker0,
+                delta_r=delta_firm0,
+                horizon=3,
+                last_mover="employer",
             )
-            st.session_state["initial_offer_result"] = init_res
+
+            # 가장 이른 employee 턴의 몫을 "초기 제시"로 사용
+            employee_states = [stt for stt in path if stt.proposer == "employee"]
+            if not employee_states:
+                raise ValueError("employee 차례가 포함된 라운드가 없습니다. (코드 설정 오류)")
+
+            first_emp_state = min(employee_states, key=lambda s: s.round_index)
+            initial_share = first_emp_state.W_e
+            initial_salary = initial_share * E_max0
+
+            st.session_state["initial_offer_result"] = {
+                "S_target": S_target,
+                "E_max": E_max0,
+                "delta_E": delta_worker0,
+                "delta_R": delta_firm0,
+                "initial_salary": initial_salary,
+                "initial_share": initial_share,
+            }
+            st.session_state["initial_offer_path"] = path
+
         except Exception as e:
             st.session_state["initial_offer_result"] = None
+            st.session_state["initial_offer_path"] = None
             st.error(f"오류가 발생했습니다: {e}")
 
     init_res = st.session_state["initial_offer_result"]
+    path = st.session_state["initial_offer_path"]
 
     if init_res:
-        salary_star = init_res["salary_worker"]      # 균형 연봉 = 추천 최초 제시 연봉
-        share_worker = init_res["share_worker"]
-        share_firm = init_res["share_firm"]
+        initial_salary = init_res["initial_salary"]
 
         # 🔳 검은 상자 + 큰 글씨 UI
         st.markdown(
@@ -1247,13 +1341,13 @@ elif page == "p4":
             <div style="padding:24px;border-radius:18px;border:2px solid #000;
                         background-color:#111;color:#fff;text-align:center;">
                 <div style="font-size:0.95rem;margin-bottom:10px;opacity:0.8;">
-                    루빈스타인 SPE 기준 추천 최초 제시 연봉
+                    역진행 균형 경로 기준 추천 초기 제시 연봉
                 </div>
                 <div style="font-size:2rem;font-weight:700;">
-                    {format_currency(salary_star)}
+                    {format_currency(initial_salary)}
                 </div>
                 <div style="margin-top:10px;font-size:0.95rem;opacity:0.9;">
-                    (이 연봉을 처음 제시하면, 이론상 바로 수락되는 균형입니다.)
+                    (희망 최종 연봉 S* = {format_currency(init_res['S_target'])})
                 </div>
             </div>
             """,
@@ -1261,52 +1355,48 @@ elif page == "p4":
         )
 
         st.markdown("---")
-        st.markdown("#### 균형 구조 해석")
+        st.markdown("#### 라운드별 몫과 연봉 경로")
 
-        st.write(
-            f"- 최소 수용 연봉 B: {format_currency(min_salary0)}  \n"
-            f"- 회사 최대 지불 연봉 E: {format_currency(max_salary0)}"
-        )
-        st.write(
-            f"- 근로자 몫 비율: {format_percent(share_worker)}  \n"
-            f"- 회사 몫 비율: {format_percent(share_firm)}"
-        )
-        st.write(
-            f"- 회사 입장에서는 이 연봉을 제시해도 여전히 약 "
-            f"{format_currency(init_res['surplus_firm'])} 만큼의 여유 잉여가 남습니다."
-        )
+        if path:
+            table = []
+            for stt in path:
+                salary_emp = stt.W_e * init_res["E_max"]
+                salary_firm = stt.W_r * init_res["E_max"]
+                table.append([
+                    f"t{stt.round_index}",
+                    "구직자" if stt.proposer == "employee" else "회사",
+                    round(stt.W_e, 4),
+                    round(stt.W_r, 4),
+                    f"{salary_emp:,.0f} 원",
+                    f"{salary_firm:,.0f} 원",
+                ])
 
-        with st.expander("수식 자세히 보기"):
+            st.table(table)
+
+        with st.expander("계산 아이디어 설명"):
             st.markdown(
                 r"""
-                **1. 파라미터**
-
-                - 최소 수용 연봉: \( B \)  
-                - 회사 최대 지불 연봉: \( E \)  
-                - 구직자 할인율: \( \delta_E \)  
-                - 기업 할인율: \( \delta_R \)
-
-                **2. 루빈스타인 균형에서 근로자 몫**
-
-                \[
-                  v_W = \frac{1 - \delta_R}{1 - \delta_E \delta_R}
-                \]
-
-                이 값은 **근로자가 전체 파이 \( \pi = E - B \)** 에서 가져가는 비율입니다.
-
-                **3. 균형 최종 연봉(=최초 제시 연봉)**
-
-                \[
-                  S^* = B + v_W \cdot (E - B)
-                \]
-
-                루빈스타인 모형에서 근로자가 먼저 제안한다고 가정하면,  
-                **첫 제안이 곧바로 수락되는 균형**이므로  
-                이 \( S^* \)가 바로 **추천 최초 제시 연봉**이 됩니다.
+                - 사용자가 입력한 \( S^* \) 를 **마지막 라운드 t에서의 합의 연봉**이라고 봅니다.  
+                  이때 파이 전체를 \( E \) 로 보고, 근로자 몫은 \( x_t = S^*/E \) 가 됩니다.
+                - 할인율 \( \delta_E, \delta_R \) 을 이용해
+                  t, t−1, t−2, t−3에서의 근로자/기업 몫을
+                  \[
+                    W_r^{t-1} = 1 - \delta_E W_e^t,\quad
+                    W_e^{t-1} = 1 - W_r^{t-1}
+                  \]
+                  또는
+                  \[
+                    W_e^{t-1} = 1 - \delta_R W_r^t,\quad
+                    W_r^{t-1} = 1 - W_e^{t-1}
+                  \]
+                  이런 식으로 역산합니다.
+                - 이렇게 얻은 경로 중 **가장 이른 employee 차례**의 몫 \( W_e^{\text{start}} \) 에
+                  회사 최대 연봉 \( E \) 를 곱한 값이  
+                  **추천 초기 제시 연봉**입니다.
                 """
             )
     else:
-        st.info("나의 최소 수용 연봉 B, 회사 최대 연봉 E, 할인율 δ_E / δ_R을 입력한 뒤 계산 버튼을 눌러주세요.")
+        st.info("희망 최종 연봉 S*, 회사 최대 연봉 E, 할인율 δ_E / δ_R을 입력한 뒤 계산 버튼을 눌러주세요.")
 
 
 # ===================== (아래 클래스들은 건드리지 않고 그대로 둠) ====================
