@@ -375,6 +375,8 @@ def compute_job_change(
 ):
     """
     HTML 2페이지(이직 여부 결정)에서 하던 Wp/Wk 계산.
+    - 현재/이직 업종 성장률을 각각 반영
+    - DART ok 여부와 상관없이 숫자만 되면 무조건 이직/잔류/보류 중 하나는 나오게 함
     """
     if not current_industry or not target_industry:
         raise ValueError("현재 직종과 이직 고려 직종을 모두 선택해야 합니다.")
@@ -385,24 +387,35 @@ def compute_job_change(
     if not current_corp.strip() or not next_corp.strip():
         raise ValueError("현재 기업과 이직 고려 기업명을 모두 입력해야 합니다.")
 
+    # 1) 회사 데이터 호출
     now_info = fetch_corp_metrics(current_corp)
     next_info = fetch_corp_metrics(next_corp)
 
     now_metrics = now_info["metrics"]
     next_metrics = next_info["metrics"]
 
+    now_ok = bool(now_info.get("ok"))
+    next_ok = bool(next_info.get("ok"))
+
+    # 2) 업종 성장률
     g_now_ind = get_industry_growth(current_industry)
     g_next_ind = get_industry_growth(target_industry)
 
+    # 3) SpBase: 현재 vs 이직 업종을 분리해서 사용
     salary_scale = salary / 100_000_000  # 1억 기준
-    sp_base = salary_scale * ((1.0 + g_now_ind) ** years)
 
+    sp_base_now = salary_scale * ((1.0 + g_now_ind) ** years)
+    sp_base_next = salary_scale * ((1.0 + g_next_ind) ** years)
+
+    # 4) 회사 계수
     factor_now = company_factor(now_metrics, g_now_ind)
     factor_next = company_factor(next_metrics, g_next_ind)
 
-    wp = sp_base * factor_now
-    wk = sp_base * factor_next
+    # 5) 최종 Wp, Wk
+    wp = sp_base_now * factor_now
+    wk = sp_base_next * factor_next
 
+    # 6) 숫자 기준으로만 의사결정 (API ok 여부는 경고로만 사용)
     if math.isfinite(wp) and math.isfinite(wk):
         if wk > wp:
             decision = "이직!"
@@ -423,9 +436,14 @@ def compute_job_change(
         "next_metrics": next_metrics,
         "now_warnings": now_info["warnings"],
         "next_warnings": next_info["warnings"],
+        "now_ok": now_ok,
+        "next_ok": next_ok,
         "g_now_ind": g_now_ind,
         "g_next_ind": g_next_ind,
-        "sp_base": sp_base,
+        # 호환용 + 디버깅용 둘 다 제공
+        "sp_base": sp_base_now,
+        "sp_base_now": sp_base_now,
+        "sp_base_next": sp_base_next,
         "factor_now": factor_now,
         "factor_next": factor_next,
     }
@@ -524,7 +542,7 @@ if page == "p2":
                 value=3.0,
                 step=0.5,
             )
-            current_corp = st.text_input("현재 기업", placeholder="예: 삼성전자")
+            current_corp = st.text_input("현재 기업", placeholder="예: 강원랜드")
         with col4:
             salary = st.number_input(
                 "현재 연봉 (원)",
@@ -534,7 +552,7 @@ if page == "p2":
                 step=1_000_000.0,
                 format="%.0f",
             )
-            next_corp = st.text_input("이직 기업", placeholder="예: 네이버")
+            next_corp = st.text_input("이직 기업", placeholder="예: 삼성전자")
 
         calc_submit = st.form_submit_button("계산")
 
@@ -611,6 +629,13 @@ if page == "p2":
     if result:
         decision = result["decision"]
 
+        # DART 데이터 신뢰도 안내
+        if (not result.get("now_ok", True)) or (not result.get("next_ok", True)):
+            st.info(
+                "⚠ 일부 회사 데이터가 DART에서 완전하게 조회되지 않아, "
+                "업종 평균/기본값으로 보정된 추정치입니다."
+            )
+
         if decision == "잔류!":
             st.warning(
                 "현재 회사의 Wp가 이직 회사의 Wk보다 높게 계산되었습니다.\n\n"
@@ -619,7 +644,7 @@ if page == "p2":
         elif decision == "보류":
             st.info("두 회사의 지수가 거의 비슷합니다. 다른 요소(워라밸, 조직문화 등)를 더 고려해 보세요.")
         elif decision == "계산 불가":
-            st.error("지수를 계산할 수 없습니다. 입력값과 회사 데이터를 다시 확인해 주세요.")
+            st.error("지수를 계산할 수 없습니다. 입력값과 회사 데이터(연봉, 연차 등)를 다시 확인해 주세요.")
 
         if decision == "이직!":
             st.success("이직 회사의 Wk가 현재 회사의 Wp보다 높게 계산되었습니다.")
@@ -635,7 +660,8 @@ if page == "p2":
             st.write(f"연차: `{years}` 년")
             st.write(f"현재 직종 성장률 g_now_ind: `{result['g_now_ind']:.4f}`")
             st.write(f"이직 직종 성장률 g_next_ind: `{result['g_next_ind']:.4f}`")
-            st.write(f"SpBase = (연봉 / 1억) × (1 + g_now_ind)^연차 = `{result['sp_base']:.4f}`")
+            st.write(f"SpBase_now = (연봉 / 1억) × (1 + g_now_ind)^연차 = `{result['sp_base_now']:.4f}`")
+            st.write(f"SpBase_next = (연봉 / 1억) × (1 + g_next_ind)^연차 = `{result['sp_base_next']:.4f}`")
             st.write(f"현재 회사 계수 factor_now: `{result['factor_now']:.4f}`")
             st.write(f"이직 회사 계수 factor_next: `{result['factor_next']:.4f}`")
 
@@ -660,9 +686,10 @@ if page == "p2":
                 ---
                 **공식 정리**
 
-                - `SpBase = (연봉 / 100,000,000) × (1 + 산업성장률)^연차`
-                - `Wp = SpBase × 회사계수(현재 회사)`
-                - `Wk = SpBase × 회사계수(이직 회사)`
+                - `SpBase_now = (연봉 / 100,000,000) × (1 + g_now_ind)^연차`
+                - `SpBase_next = (연봉 / 100,000,000) × (1 + g_next_ind)^연차`
+                - `Wp = SpBase_now × 회사계수(현재 회사)`
+                - `Wk = SpBase_next × 회사계수(이직 회사)`
                 - 회사계수:
                     - 성장률 컴포넌트: `1 + salesGrowth` *(없으면 산업성장률 사용)*
                     - 규모 컴포넌트: `log10(assets) / 12`
@@ -716,12 +743,12 @@ elif page == "p5":
     from dataclasses import dataclass
     from typing import Literal, List
 
-    Actor = Literal["employee", "employer"]
+    ActorLocal = Literal["employee", "employer"]
 
     @dataclass
-    class RoundState:
+    class RoundStateLocal:
         round_index: int
-        proposer: Actor
+        proposer: ActorLocal
         W_e: float
         W_r: float
 
@@ -738,34 +765,34 @@ elif page == "p5":
             self.pie = E - B
             self.x = (S - B) / self.pie  # employee share at t
 
-        def compute_path(self) -> List[RoundState]:
-            path = []
+        def compute_path(self) -> List[RoundStateLocal]:
+            path: List[RoundStateLocal] = []
 
             # t
             W_e = self.x
             W_r = 1 - W_e
-            path.append(RoundState(0, self.first_mover, W_e, W_r))
+            path.append(RoundStateLocal(0, self.first_mover, W_e, W_r))
 
-            proposer = self.first_mover
+            proposer: ActorLocal = self.first_mover
 
             for step in range(1, self.horizon + 1):
                 if proposer == "employee":
                     W_r_prev = 1 - self.delta_e * W_e
                     W_e_prev = 1 - W_r_prev
-                    proposer_prev = "employer"
+                    proposer_prev: ActorLocal = "employer"
                 else:
                     W_e_prev = 1 - self.delta_r * W_r
                     W_r_prev = 1 - W_e_prev
                     proposer_prev = "employee"
 
-                path.append(RoundState(-step, proposer_prev, W_e_prev, W_r_prev))
+                path.append(RoundStateLocal(-step, proposer_prev, W_e_prev, W_r_prev))
 
                 W_e, W_r, proposer = W_e_prev, W_r_prev, proposer_prev
 
             path.sort(key=lambda x: x.round_index)
             return path
 
-        def offer(self, state: RoundState):
+        def offer(self, state: RoundStateLocal):
             if state.proposer == "employee":
                 return self.B + self.pie * state.W_e
             else:
@@ -792,9 +819,9 @@ elif page == "p5":
         st.session_state["g_idx"] = 0
 
     if "g_path" in st.session_state:
-        path = st.session_state["g_path"]
-        idx = st.session_state["g_idx"]
-        game = st.session_state["g_game"]
+        path: List[RoundStateLocal] = st.session_state["g_path"]
+        idx: int = st.session_state["g_idx"]
+        game: BargainGame = st.session_state["g_game"]
 
         state = path[idx]
 
@@ -804,8 +831,8 @@ elif page == "p5":
         st.write(f"W_e (구직자 몫): **{state.W_e:.4f}**")
         st.write(f"W_r (고용주 몫): **{state.W_r:.4f}**")
 
-        offer = game.offer(state)
-        st.markdown(f"### 💰 이번 라운드 제안 금액: **{offer:,.0f} 원**")
+        offer_val = game.offer(state)
+        st.markdown(f"### 💰 이번 라운드 제안 금액: **{offer_val:,.0f} 원**")
 
         c1, c2 = st.columns(2)
 
