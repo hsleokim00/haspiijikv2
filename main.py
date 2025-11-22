@@ -734,128 +734,285 @@ elif page == "p3":
             st.session_state["page"] = "p4"
             st.rerun()
 
-# ===================== PAGE 5: 왔다갔다 협상 라운드 시뮬레이터 =====================
+# ===================== PAGE 5: 내시 균형 기반 인터랙티브 협상 시뮬레이터 =====================
 elif page == "p5":
+    st.markdown("### 협상 라운드 시뮬레이터 (Nash 균형 기반)")
+    st.caption(
+        "B(최소 수용 연봉), E(회사 최대 지불 의사), 협상력 θ를 기준으로 "
+        "이론적 균형 연봉을 먼저 계산하고, 회사와 구직자가 번갈아 제안/수락을 하며 "
+        "실제 협상을 연습해 볼 수 있는 시뮬레이터입니다."
+    )
 
-    st.markdown("### 협상 라운드 시뮬레이터 (왔다갔다 구조)")
-    st.caption("t-3 → t-2 → t-1 → t 구조의 교대 제안 협상 라운드를 실제로 왔다갔다 해볼 수 있습니다.")
+    # ---------------- 세션 상태 초기화 ----------------
+    if "neg_state" not in st.session_state:
+        st.session_state["neg_state"] = None
 
-    from dataclasses import dataclass
-    from typing import Literal, List
+    neg_state = st.session_state["neg_state"]
 
-    ActorLocal = Literal["employee", "employer"]
+    # ---------------- 내시 협상해결 함수 ----------------
+    def compute_nash_salary(min_salary: float, max_salary: float, worker_power: float):
+        """
+        내시 협상해결 (Nash bargaining solution)
+        S* = B + θ (E - B)
+        worker_power θ ∈ [0,1]: 근로자의 협상력
+        """
+        if min_salary <= 0 or max_salary <= 0:
+            raise ValueError("연봉은 0보다 커야 합니다.")
+        if max_salary <= min_salary:
+            raise ValueError("max_salary는 min_salary보다 커야 합니다.")
+        if not (0.0 <= worker_power <= 1.0):
+            raise ValueError("worker_power (협상력 θ)는 0과 1 사이여야 합니다.")
 
-    @dataclass
-    class RoundStateLocal:
-        round_index: int
-        proposer: ActorLocal
-        W_e: float
-        W_r: float
+        pie = max_salary - min_salary
+        salary_worker = min_salary + worker_power * pie
+        share_worker = worker_power
+        share_firm = 1.0 - worker_power
+        surplus_firm = max_salary - salary_worker
 
-    class BargainGame:
-        def __init__(self, B, S, E, delta_e, delta_r, first_mover, horizon=3):
-            self.B = B
-            self.S = S
-            self.E = E
-            self.delta_e = delta_e
-            self.delta_r = delta_r
-            self.first_mover = first_mover
-            self.horizon = horizon
+        return {
+            "pie": pie,
+            "share_worker": share_worker,
+            "share_firm": share_firm,
+            "salary_worker": salary_worker,
+            "surplus_firm": surplus_firm,
+        }
 
-            self.pie = E - B
-            self.x = (S - B) / self.pie  # employee share at t
+    # ---------------- 회사 제안 규칙 (Nash 균형 S* 쪽으로 수렴) ----------------
+    def compute_employer_offer(B: float, E: float, S_star: float, last_employee_offer: Optional[float]) -> float:
+        """
+        회사(employer)가 제시할 연봉 규칙:
+        - last_employee_offer가 없으면: 바로 내시 균형값 S* 제안
+        - 있으면: 이전 구직자 제안과 S* 사이를 50% 정도 보정하며 이동
+        """
+        # 안전하게 [B, E] 안으로 먼저 클램프
+        S_star_clamped = max(B, min(E, S_star))
 
-        def compute_path(self) -> List[RoundStateLocal]:
-            path: List[RoundStateLocal] = []
+        if last_employee_offer is None:
+            return S_star_clamped
 
-            # t
-            W_e = self.x
-            W_r = 1 - W_e
-            path.append(RoundStateLocal(0, self.first_mover, W_e, W_r))
+        # 이전 구직자 제안에서 S* 쪽으로 50%만 이동
+        offer = last_employee_offer + 0.5 * (S_star_clamped - last_employee_offer)
+        # 다시 [B, E] 안으로
+        offer = max(B, min(E, offer))
+        return offer
 
-            proposer: ActorLocal = self.first_mover
+    # ---------------- 새 협상 시작 폼 ----------------
+    with st.expander("🔧 협상 기본 설정", expanded=neg_state is None):
+        with st.form("neg_init_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                B = st.number_input(
+                    "최소 수용 연봉 B (원)",
+                    min_value=1_000_000,
+                    max_value=5_000_000_000,
+                    value=50_000_000,
+                    step=1_000_000,
+                )
+                max_rounds = st.number_input(
+                    "최대 라운드 수",
+                    min_value=1,
+                    max_value=10,
+                    value=4,
+                    step=1,
+                )
+            with col2:
+                E = st.number_input(
+                    "회사의 최대 지불 의사 연봉 E (원)",
+                    min_value=1_000_000,
+                    max_value=5_000_000_000,
+                    value=80_000_000,
+                    step=1_000_000,
+                )
+                worker_power = st.slider(
+                    "나의 협상력 θ (0 = 거의 힘 없음, 1 = 매우 강한 협상력)",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.5,
+                    step=0.05,
+                )
 
-            for step in range(1, self.horizon + 1):
-                if proposer == "employee":
-                    W_r_prev = 1 - self.delta_e * W_e
-                    W_e_prev = 1 - W_r_prev
-                    proposer_prev: ActorLocal = "employer"
-                else:
-                    W_e_prev = 1 - self.delta_r * W_r
-                    W_r_prev = 1 - W_e_prev
-                    proposer_prev = "employee"
+            first_mover = st.selectbox(
+                "첫 제안자 (처음 제시자)",
+                options=["employer", "employee"],
+                format_func=lambda x: "employer (회사)" if x == "employer" else "employee (구직자)",
+            )
 
-                path.append(RoundStateLocal(-step, proposer_prev, W_e_prev, W_r_prev))
+            submitted_init = st.form_submit_button("새 협상 시작")
 
-                W_e, W_r, proposer = W_e_prev, W_r_prev, proposer_prev
-
-            path.sort(key=lambda x: x.round_index)
-            return path
-
-        def offer(self, state: RoundStateLocal):
-            if state.proposer == "employee":
-                return self.B + self.pie * state.W_e
+        if submitted_init:
+            if B >= E:
+                st.error("B는 E보다 작아야 합니다. (최소 수용 연봉 < 회사 최대 지불 연봉)")
             else:
-                return self.B + self.pie * state.W_r
+                try:
+                    nash_res = compute_nash_salary(B, E, worker_power)
+                    S_star = nash_res["salary_worker"]
+                except Exception as e:
+                    st.error(f"내시 균형 계산 중 오류가 발생했습니다: {e}")
+                else:
+                    st.session_state["neg_state"] = {
+                        "B": B,
+                        "E": E,
+                        "worker_power": worker_power,
+                        "max_rounds": int(max_rounds),
+                        "first_mover": first_mover,
+                        "current_round": 1,
+                        "turn": first_mover,          # 현재 턴: 'employer' or 'employee'
+                        "status": "ongoing",          # 'ongoing' / 'success' / 'failed'
+                        "final_salary": None,
+                        "last_employer_offer": None,
+                        "last_employee_offer": None,
+                        "nash_salary": S_star,        # 내시 균형 연봉 S*
+                        "nash_share_worker": nash_res["share_worker"],
+                        "nash_share_firm": nash_res["share_firm"],
+                    }
+                    neg_state = st.session_state["neg_state"]
 
-    # 입력 폼
-    with st.form("round_form"):
-        B = st.number_input("최소 수용 연봉 B", 1_000_000, 1_000_000_000, 50_000_000)
-        S = st.number_input("희망 연봉 S", 1_000_000, 1_000_000_000, 65_000_000)
-        E = st.number_input("회사의 최대 지불 의사 연봉 E", 1_000_000, 1_000_000_000, 80_000_000)
+    # ---------------- 협상 상태 없으면 안내 ----------------
+    if neg_state is None:
+        st.info("위의 '협상 기본 설정'에서 B, E, 협상력 θ, 첫 제안자, 최대 라운드 수를 입력하고 협상을 시작하세요.")
+        st.stop()
 
-        delta_e = st.slider("구직자 할인율 δ_E", 0.5, 0.99, 0.95, step=0.01)
-        delta_r = st.slider("고용주 할인율 δ_R", 0.5, 0.99, 0.90, step=0.01)
+    # 편하게 쓰려고 로컬 변수로 풀어두기
+    B = neg_state["B"]
+    E = neg_state["E"]
+    worker_power = neg_state["worker_power"]
+    max_rounds = neg_state["max_rounds"]
+    first_mover = neg_state["first_mover"]
+    current_round = neg_state["current_round"]
+    turn = neg_state["turn"]
+    status = neg_state["status"]
+    S_star = neg_state["nash_salary"]
 
-        first = st.selectbox("t에서 누가 제안하는가?", ["employee", "employer"])
-        horizon = st.number_input("시작 라운드 (예: 3 → t-3)", 1, 10, 3)
+    # ---------------- 공통 헤더: 현재 상태 표시 ----------------
+    st.markdown(
+        f"**현재 라운드:** {current_round} / {max_rounds}  &nbsp;&nbsp;|&nbsp;&nbsp; "
+        f"**첫 제안자:** {'회사(employer)' if first_mover == 'employer' else '구직자(employee)'}"
+    )
+    st.markdown(
+        f"- **B (최소 수용 연봉)**: {B:,.0f} 원  \n"
+        f"- **E (회사 최대 지불 연봉)**: {E:,.0f} 원  \n"
+        f"- **협상력 θ (근로자 몫 비율)**: {worker_power:.2f}  \n"
+        f"- **내시 균형 연봉 S***: {S_star:,.0f} 원"
+    )
 
-        submit = st.form_submit_button("라운드 계산 시작")
+    st.markdown("---")
 
-    if submit:
-        game = BargainGame(B, S, E, delta_e, delta_r, first, horizon)
-        st.session_state["g_game"] = game
-        st.session_state["g_path"] = game.compute_path()
-        st.session_state["g_idx"] = 0
+    # ---------------- 협상 종료 상태라면 결과만 표시 ----------------
+    if status in ("success", "failed"):
+        if status == "success":
+            st.success(
+                f"🎉 이직을 축하합니다! 최종 합의 연봉은 **{neg_state['final_salary']:,.0f} 원** 입니다."
+            )
+            st.caption(
+                f"참고: 내시 균형 연봉 S*는 {S_star:,.0f} 원이었고, "
+                f"당신의 협상력 θ = {worker_power:.2f} 에 해당하는 값입니다."
+            )
+        else:
+            st.error("❌ 계약이 성사되지 않았습니다. (설정한 최대 라운드 내에서 합의 실패)")
 
-    if "g_path" in st.session_state:
-        path: List[RoundStateLocal] = st.session_state["g_path"]
-        idx: int = st.session_state["g_idx"]
-        game: BargainGame = st.session_state["g_game"]
+        if st.button("다시 새로운 협상 시작하기"):
+            st.session_state["neg_state"] = None
+            st.rerun()
+        st.stop()
 
-        state = path[idx]
+    # ---------------- 라운드 종료/실패 체크 함수 ----------------
+    def end_round_or_fail():
+        """라운드를 하나 소모하고, 한도를 넘으면 실패 처리."""
+        neg_state["current_round"] += 1
+        if neg_state["current_round"] > neg_state["max_rounds"]:
+            neg_state["status"] = "failed"
 
-        st.subheader(f"현재 라운드: t{state.round_index}")
-        st.write(f"제안자: **{state.proposer}**")
+    # ---------------- TURN: employer (회사 제안, 사용자는 수락/거절만) ----------------
+    if turn == "employer":
+        # 회사 제안 계산 (내시 균형 S* 쪽으로)
+        employer_offer = compute_employer_offer(
+            B=B,
+            E=E,
+            S_star=S_star,
+            last_employee_offer=neg_state["last_employee_offer"],
+        )
+        neg_state["last_employer_offer"] = employer_offer
 
-        st.write(f"W_e (구직자 몫): **{state.W_e:.4f}**")
-        st.write(f"W_r (고용주 몫): **{state.W_r:.4f}**")
+        st.markdown("#### 🏢 회사(employer)의 제안")
+        st.markdown(
+            f"회사가 이번 라운드에 제시한 연봉은 **{employer_offer:,.0f} 원** 입니다.\n\n"
+            "이 제안을 수락할지, 거절하고 다음 라운드(구직자 제안)로 넘어갈지 선택하세요."
+        )
 
-        offer_val = game.offer(state)
-        st.markdown(f"### 💰 이번 라운드 제안 금액: **{offer_val:,.0f} 원**")
+        col_acc, col_rej = st.columns(2)
+        with col_acc:
+            if st.button("✅ 수락 (협상 종료)", key="accept_from_employer"):
+                neg_state["status"] = "success"
+                neg_state["final_salary"] = employer_offer
+                st.rerun()
+        with col_rej:
+            if st.button("❌ 거절하고 다음 라운드로", key="reject_from_employer"):
+                end_round_or_fail()
+                if neg_state["status"] == "failed":
+                    st.rerun()
+                else:
+                    neg_state["turn"] = "employee"
+                    st.rerun()
 
-        c1, c2 = st.columns(2)
+        st.info(
+            "※ employer가 첫 제안자로 설정된 경우, 첫 라운드에서는 "
+            "이렇게 회사 제안 → 수락/거절만 선택하게 됩니다."
+        )
 
-        if c1.button("⬅ 이전 라운드", disabled=idx == 0):
-            st.session_state["g_idx"] -= 1
+    # ---------------- TURN: employee (사용자가 연봉 제시) ----------------
+    elif turn == "employee":
+        st.markdown("#### 👤 구직자(employee)의 제안")
+        st.markdown(
+            "이번 라운드에서는 **당신이 원하는 연봉을 회사에 제시**합니다.\n"
+            "회사는 이 제안이 자신의 지불 가능 범위(B~E) 안에 있으면 바로 수락하고, "
+            "아니라면 내시 균형 연봉 S*를 기준으로 다시 연봉을 제시합니다."
+        )
 
-        if c2.button("다음 라운드 ➡", disabled=idx == len(path) - 1):
-            st.session_state["g_idx"] += 1
+        with st.form("employee_offer_form"):
+            suggested = st.number_input(
+                "이번 라운드에서 제시할 연봉 (원)",
+                min_value=1_000_000,
+                max_value=5_000_000_000,
+                value=int(max(B, min(E, S_star))),  # 기본값을 S* 근처로
+                step=1_000_000,
+            )
+            send_offer = st.form_submit_button("제안 보내기")
 
-        st.markdown("---")
-        st.markdown("### 전체 라운드 요약")
+        if send_offer:
+            neg_state["last_employee_offer"] = suggested
 
-        table = []
-        for stt in path:
-            table.append([
-                f"t{stt.round_index}",
-                stt.proposer,
-                round(stt.W_e, 4),
-                round(stt.W_r, 4),
-                f"{game.offer(stt):,} 원"
-            ])
+            # 1) 회사 지불 가능 범위 안이면 => 즉시 수락, 협상 종료
+            if B <= suggested <= E:
+                neg_state["status"] = "success"
+                neg_state["final_salary"] = suggested
+                st.rerun()
+            else:
+                # 2) 회사 범위를 벗어났다면 => 회사가 내시 균형 S*를 기준으로 다시 제안
+                employer_counter = compute_employer_offer(
+                    B=B, E=E, S_star=S_star, last_employee_offer=suggested
+                )
+                neg_state["last_employer_offer"] = employer_counter
 
-        st.table(table)
+                # 이 라운드는 "구직자 제안 + 회사 대응"까지 진행된 것으로 보고 라운드 소진
+                end_round_or_fail()
+                if neg_state["status"] == "failed":
+                    st.rerun()
+                else:
+                    # 다음 화면에는 회사 제안에 대한 수락/거절을 받는 턴으로 전환
+                    neg_state["turn"] = "employer"
+                    st.rerun()
+
+        st.info(
+            "※ employee가 첫 제안자로 설정된 경우, 협상 시작 직후 이 화면이 먼저 뜨고, "
+            "당신의 제안을 보고 회사가 수락/재제안하게 됩니다."
+        )
+
+    # ---------------- 공통: 리셋 버튼 ----------------
+    st.markdown("---")
+    if st.button("🔄 이 협상 초기화하고 다시 설정하기"):
+        st.session_state["neg_state"] = None
+        st.rerun()
+
 
 # ===================== PAGE 4: 초기 연봉 제시 =====================
 elif page == "p4":
