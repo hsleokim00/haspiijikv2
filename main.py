@@ -1166,25 +1166,25 @@ elif page == "p4":
         st.session_state["page"] = "p3"
         st.rerun()
 
-    st.markdown("### 초기 연봉 제시 (역진행 SPE 스타일)")
+    st.markdown("### 초기 연봉 제시 (라운드 역진행 기반)")
     st.caption(
-        "희망하는 최종 연봉 S*, 회사가 제시할 수 있는 최대 연봉 E, "
-        "구직자/기업의 할인율(δ_E, δ_R)을 입력하면\n"
-        "마지막 라운드(t)에서 S*로 합의된다고 가정하고, "
-        "t-1, t-2, t-3로 역진행해 **첫 라운드에서 제시할 초기 연봉**을 계산합니다."
+        "‘협상 후 최종 연봉(S*)’, ‘회사의 최대 수용 연봉(E)’, ‘라운드 수’, "
+        "‘개인·기업의 할인율(δ_E, δ_R)’을 입력하면,\n"
+        "마지막 라운드 t에서 S*로 합의된다고 가정하고 t-1, t-2, ... 로 역산하여\n"
+        "**협상 시작 시(첫 라운드) 제시해야 할 이상적인 초기 연봉**을 계산합니다."
     )
 
     from dataclasses import dataclass
     from typing import Literal, List
 
-    Actor = Literal["employee", "employer"]
+    PathActor = Literal["employee", "employer"]
 
     @dataclass
-    class RoundState:
+    class PathState:
         round_index: int   # 0 = t(최종), -1 = t-1, -2 = t-2, ...
-        proposer: Actor
-        W_e: float         # 해당 라운드에서 근로자 몫
-        W_r: float         # 해당 라운드에서 회사 몫
+        proposer: PathActor
+        W_e: float         # 이 라운드에서 근로자 몫 (비율)
+        W_r: float         # 이 라운드에서 회사 몫 (비율)
 
     def clamp01(x: float) -> float:
         return max(0.0, min(1.0, x))
@@ -1193,34 +1193,38 @@ elif page == "p4":
         x_target: float,
         delta_e: float,
         delta_r: float,
-        horizon: int = 3,
-        last_mover: Actor = "employer",
-    ) -> List[RoundState]:
+        horizon: int,
+        last_mover: PathActor,
+    ) -> List[PathState]:
         """
         마지막 라운드 t에서 근로자 몫 x_target으로 합의된다고 가정하고,
-        t-1, t-2, ... 로 역진행해 각 라운드의 균형 몫을 계산.
+        t-1, t-2, ... t-horizon 까지의 몫(W_e, W_r)을 역산.
+        - horizon = 전체 라운드 수 - 1
+        - last_mover = t 시점 제안자 ('employee' or 'employer')
         """
         if not (0.0 < x_target < 1.0):
             raise ValueError("S* / E 는 0과 1 사이여야 합니다.")
         if not (0.0 < delta_e < 1.0 and 0.0 < delta_r < 1.0):
             raise ValueError("할인율 δ_E, δ_R은 0과 1 사이여야 합니다.")
+        if horizon < 0:
+            raise ValueError("horizon은 0 이상이어야 합니다.")
 
         W_e = x_target
         W_r = 1.0 - x_target
-        proposer: Actor = last_mover
+        proposer: PathActor = last_mover
 
-        states: List[RoundState] = [
-            RoundState(round_index=0, proposer=proposer, W_e=W_e, W_r=W_r)
+        states: List[PathState] = [
+            PathState(round_index=0, proposer=proposer, W_e=W_e, W_r=W_r)
         ]
 
         for step in range(1, horizon + 1):
             if proposer == "employee":
-                # 이번 라운드 제안자가 employee였으면, 바로 이전 라운드는 employer 제안 라운드
+                # 이번 라운드 제안자가 employee였다면, 그 이전(t-1)은 employer 제안 라운드
                 W_r_prev = 1.0 - delta_e * W_e
                 W_e_prev = 1.0 - W_r_prev
-                proposer_prev: Actor = "employer"
+                proposer_prev: PathActor = "employer"
             else:
-                # 이번 라운드 제안자가 employer였으면, 바로 이전 라운드는 employee 제안 라운드
+                # 이번 라운드 제안자가 employer였다면, 그 이전(t-1)은 employee 제안 라운드
                 W_e_prev = 1.0 - delta_r * W_r
                 W_r_prev = 1.0 - W_e_prev
                 proposer_prev = "employee"
@@ -1229,7 +1233,7 @@ elif page == "p4":
             W_r_prev = clamp01(W_r_prev)
 
             states.append(
-                RoundState(
+                PathState(
                     round_index=-step,
                     proposer=proposer_prev,
                     W_e=W_e_prev,
@@ -1242,27 +1246,27 @@ elif page == "p4":
         states.sort(key=lambda s: s.round_index)
         return states
 
-    # 결과 저장용
+    # 세션 결과 저장
     if "initial_offer_result" not in st.session_state:
         st.session_state["initial_offer_result"] = None
     if "initial_offer_path" not in st.session_state:
         st.session_state["initial_offer_path"] = None
 
-    # ---- 입력 폼: S*, E, δ_E, δ_R ----
-    with st.form("initial_offer_form_from_S"):
+    # ---- 입력 폼: 협상 후 최종 연봉, 회사 최대 연봉, 라운드 수, 할인율 ----
+    with st.form("initial_offer_form_from_final"):
         col1, col2 = st.columns(2)
 
         with col1:
-            S_target = st.number_input(
-                "희망하는 최종 연봉 S* (원)",
+            S_final = st.number_input(
+                "협상 후 최종 연봉 S* (원)",
                 min_value=1_000_000.0,
                 max_value=5_000_000_000.0,
                 value=70_000_000.0,
                 step=1_000_000.0,
                 format="%.0f",
             )
-            delta_worker0 = st.slider(
-                "구직자 할인율 δ_E",
+            delta_E = st.slider(
+                "개인 할인율 δ_E",
                 min_value=0.50,
                 max_value=0.99,
                 value=0.95,
@@ -1270,15 +1274,15 @@ elif page == "p4":
             )
 
         with col2:
-            E_max0 = st.number_input(
-                "회사가 오퍼할 수 있는 최대 연봉 E (원)",
+            E_max = st.number_input(
+                "회사의 최대 수용 연봉 E (원)",
                 min_value=1_000_000.0,
                 max_value=5_000_000_000.0,
                 value=90_000_000.0,
                 step=1_000_000.0,
                 format="%.0f",
             )
-            delta_firm0 = st.slider(
+            delta_R = st.slider(
                 "기업 할인율 δ_R",
                 min_value=0.50,
                 max_value=0.99,
@@ -1286,39 +1290,57 @@ elif page == "p4":
                 step=0.01,
             )
 
-        submitted_init = st.form_submit_button("초기 제시 연봉 계산")
+        rounds = st.number_input(
+            "총 라운드 수 (왕복 횟수, 최종 t 포함)",
+            min_value=1,
+            max_value=10,
+            value=3,
+            step=1,
+        )
+
+        submitted_init = st.form_submit_button("이상적인 초기 제시 연봉 계산")
 
     if submitted_init:
         try:
-            if S_target >= E_max0:
-                raise ValueError("희망 최종 연봉 S*는 회사 최대 연봉 E보다 작아야 합니다.")
+            if S_final >= E_max:
+                raise ValueError("협상 후 최종 연봉 S*는 회사 최대 수용 연봉 E보다 작아야 합니다.")
 
-            # 최종 라운드 t에서의 근로자 몫 (기준: 파이 = E, B=0 가정)
-            x_target = S_target / E_max0
+            # 최종 라운드 t에서 근로자 몫
+            x_target = S_final / E_max
 
-            # t가 employer 제안 라운드라고 가정 (t-1 employee, t-2 employer, t-3 employee ...)
+            # 가정: 협상 시작(첫 라운드)은 employee가 제안.
+            # → 라운드 수에 따라 마지막 라운드 t의 제안자(last_mover) 결정
+            #   - 라운드 수가 홀수면: employee가 마지막 제안
+            #   - 라운드 수가 짝수면: employer가 마지막 제안
+            if rounds % 2 == 1:
+                last_mover: PathActor = "employee"
+            else:
+                last_mover = "employer"
+
+            horizon = rounds - 1  # t에서 t-(rounds-1)까지 역산
             path = compute_path_from_final_share(
                 x_target=x_target,
-                delta_e=delta_worker0,
-                delta_r=delta_firm0,
-                horizon=3,
-                last_mover="employer",
+                delta_e=delta_E,
+                delta_r=delta_R,
+                horizon=horizon,
+                last_mover=last_mover,
             )
 
-            # 가장 이른 employee 턴의 몫을 "초기 제시"로 사용
+            # 가장 이른 employee 차례(가장 작은 round_index)의 몫을 초기 제시 몫으로 사용
             employee_states = [stt for stt in path if stt.proposer == "employee"]
             if not employee_states:
-                raise ValueError("employee 차례가 포함된 라운드가 없습니다. (코드 설정 오류)")
+                raise ValueError("employee 차례가 포함된 라운드가 없습니다.")
 
             first_emp_state = min(employee_states, key=lambda s: s.round_index)
             initial_share = first_emp_state.W_e
-            initial_salary = initial_share * E_max0
+            initial_salary = initial_share * E_max
 
             st.session_state["initial_offer_result"] = {
-                "S_target": S_target,
-                "E_max": E_max0,
-                "delta_E": delta_worker0,
-                "delta_R": delta_firm0,
+                "S_final": S_final,
+                "E_max": E_max,
+                "delta_E": delta_E,
+                "delta_R": delta_R,
+                "rounds": rounds,
                 "initial_salary": initial_salary,
                 "initial_share": initial_share,
             }
@@ -1341,13 +1363,13 @@ elif page == "p4":
             <div style="padding:24px;border-radius:18px;border:2px solid #000;
                         background-color:#111;color:#fff;text-align:center;">
                 <div style="font-size:0.95rem;margin-bottom:10px;opacity:0.8;">
-                    역진행 균형 경로 기준 추천 초기 제시 연봉
+                    이 협상 구조에서 추천되는 <b>이상적인 초기 제시 연봉</b>
                 </div>
                 <div style="font-size:2rem;font-weight:700;">
                     {format_currency(initial_salary)}
                 </div>
                 <div style="margin-top:10px;font-size:0.95rem;opacity:0.9;">
-                    (희망 최종 연봉 S* = {format_currency(init_res['S_target'])})
+                    (협상 후 최종 연봉 S* = {format_currency(init_res['S_final'])})
                 </div>
             </div>
             """,
@@ -1370,16 +1392,16 @@ elif page == "p4":
                     f"{salary_emp:,.0f} 원",
                     f"{salary_firm:,.0f} 원",
                 ])
-
             st.table(table)
 
         with st.expander("계산 아이디어 설명"):
             st.markdown(
                 r"""
                 - 사용자가 입력한 \( S^* \) 를 **마지막 라운드 t에서의 합의 연봉**이라고 봅니다.  
-                  이때 파이 전체를 \( E \) 로 보고, 근로자 몫은 \( x_t = S^*/E \) 가 됩니다.
+                  이때 전체 파이를 회사 최대수용 연봉 \( E \) 로 두고,
+                  근로자 몫은 \( x_t = S^*/E \) 가 됩니다.
                 - 할인율 \( \delta_E, \delta_R \) 을 이용해
-                  t, t−1, t−2, t−3에서의 근로자/기업 몫을
+                  t, t−1, t−2, ... 의 근로자/기업 몫을
                   \[
                     W_r^{t-1} = 1 - \delta_E W_e^t,\quad
                     W_e^{t-1} = 1 - W_r^{t-1}
@@ -1390,14 +1412,13 @@ elif page == "p4":
                     W_r^{t-1} = 1 - W_e^{t-1}
                   \]
                   이런 식으로 역산합니다.
-                - 이렇게 얻은 경로 중 **가장 이른 employee 차례**의 몫 \( W_e^{\text{start}} \) 에
+                - 이렇게 얻은 경로 중 **가장 처음 employee 차례**의 몫 \( W_e^{\text{start}} \) 에
                   회사 최대 연봉 \( E \) 를 곱한 값이  
-                  **추천 초기 제시 연봉**입니다.
+                  이 협상 구조에서의 **이상적인 초기 제시 연봉**입니다.
                 """
             )
     else:
-        st.info("희망 최종 연봉 S*, 회사 최대 연봉 E, 할인율 δ_E / δ_R을 입력한 뒤 계산 버튼을 눌러주세요.")
-
+        st.info("‘협상 후 최종 연봉’, ‘회사 최대 수용 연봉’, ‘라운드 수’, ‘개인·기업 할인율’을 설정한 뒤 계산 버튼을 눌러주세요.")
 
 # ===================== (아래 클래스들은 건드리지 않고 그대로 둠) ====================
 Actor = Literal["employee", "employer"]
