@@ -717,8 +717,8 @@ elif page == "p5":
     st.markdown("### 협상 라운드 시뮬레이터")
     st.caption(
         "1단계에서 협상 조건을 정하고, 2단계에서 "
-        "'이번 라운드에 내가 회사에 얼마를 제시할지'를 선택하면서 협상 과정을 연습합니다.\n"
-        "회사의 실제 제안은 입력하지 않고, 내가 주도적으로 부르는 금액에 집중합니다."
+        "'이번 라운드에 내가 회사에 얼마를 제시할지'를 입력하면, "
+        "루빈스타인 모형을 바탕으로 회사가 이론상 수락할지/거절할지를 계산해 줍니다."
     )
 
     # ---- 1. 협상 파라미터 설정 ----
@@ -727,11 +727,23 @@ elif page == "p5":
 
         col1, col2 = st.columns(2)
         with col1:
-            B = st.number_input("나의 최소 수용 연봉 B (이것보다 낮으면 절대 수락 X)", 1_000_000, 1_000_000_000, 50_000_000)
-            S = st.number_input("내가 최종적으로 받고 싶은 목표 연봉 S", 1_000_000, 1_000_000_000, 65_000_000)
+            B = st.number_input(
+                "나의 최소 수용 연봉 B (이것보다 낮으면 절대 수락 X)",
+                1_000_000, 1_000_000_000, 50_000_000
+            )
+            S = st.number_input(
+                "내가 최종적으로 받고 싶은 목표 연봉 S",
+                1_000_000, 1_000_000_000, 65_000_000
+            )
         with col2:
-            E = st.number_input("회사가 최대한 줄 수 있다고 보는 상한 E", 1_000_000, 1_000_000_000, 80_000_000)
-            total_rounds = st.number_input("최대 몇 번까지 왔다갔다 할 건가요? (라운드 수)", 1, 10, 4)
+            E = st.number_input(
+                "회사가 최대한 줄 수 있다고 보는 상한 E",
+                1_000_000, 1_000_000_000, 80_000_000
+            )
+            total_rounds = st.number_input(
+                "최대 몇 번까지 왔다갔다 할 건가요? (라운드 수)",
+                1, 10, 4
+            )
 
         col3, col4 = st.columns(2)
         with col3:
@@ -747,12 +759,16 @@ elif page == "p5":
                 help="1에 가까울수록 회사도 느긋함, 낮을수록 빨리 합의를 원함"
             )
 
-        first = st.selectbox("이론상 협상에서 먼저 말을 꺼내는 쪽", ["employer", "employee"])
+        first = st.selectbox(
+            "이론상 협상에서 누가 먼저 말을 꺼내는가? (모형 내부용 설정)",
+            ["employer", "employee"]
+        )
 
         submitted = st.form_submit_button("협상 시작 (모델 초기화)")
 
     if submitted:
         try:
+            # 1) 협상 동학(왔다갔다)을 위한 모델
             model = NegotiationModel(
                 S=S,
                 B=B,
@@ -763,12 +779,27 @@ elif page == "p5":
                 delta_E_default=delta_e,
                 delta_R_default=delta_r,
             )
+
+            # 2) 루빈스타인 균형 임금 계산 (회사가 이론상 수락할 기준점)
+            eq_res = compute_rubinstein_equilibrium(
+                min_salary=float(B),
+                max_salary=float(E),
+                delta_worker=float(delta_e),
+                delta_firm=float(delta_r),
+            )
+            eq_salary = eq_res["salary_worker"]
+
             st.session_state["neg_model"] = model
             st.session_state["neg_params"] = {"B": float(B), "S": float(S), "E": float(E)}
             st.session_state["neg_last_offer"] = None
-            st.session_state["neg_history"] = []          # [{round, my_offer, theory_offer, result}, ...]
+            st.session_state["neg_history"] = []          # [{round, my_offer, theory_offer, decision}, ...]
             st.session_state["neg_final_salary"] = None   # 최종 합의 연봉
-            st.success("협상 판이 세팅되었습니다. 아래에서 라운드를 진행해 보세요.")
+            st.session_state["neg_eq_salary"] = float(eq_salary)
+
+            st.success(
+                "협상 판이 세팅되었습니다. 아래 2단계에서 라운드를 진행해 보세요.\n\n"
+                f"참고: 루빈스타인 모형 기준 이론상 균형 연봉은 대략 **{eq_salary:,.0f} 원**입니다."
+            )
         except Exception as e:
             st.error(f"모델 초기화 중 오류가 발생했습니다: {e}")
 
@@ -782,6 +813,7 @@ elif page == "p5":
         B_val = params.get("B", model.state.B)
         S_val = params.get("S", model.state.S_target)
         E_val = params.get("E", model.state.E_max)
+        eq_salary = st.session_state.get("neg_eq_salary", S_val)  # 안전용 기본값
 
         s = model.state
 
@@ -797,7 +829,7 @@ elif page == "p5":
             st.markdown(
                 f"""<div style="padding:20px;border-radius:16px;border:2px solid #2c3e50;
                 background-color:#f7f9fc;text-align:center;">
-                <div style="font-size:0.9rem;margin-bottom:6px;">이번 협상에서 선택한 최종 합의 연봉</div>
+                <div style="font-size:0.9rem;margin-bottom:6px;">이번 협상에서 결정된 최종 합의 연봉</div>
                 <div style="font-size:1.8rem;font-weight:bold;margin-bottom:6px;">
                 {final_salary:,.0f} 원
                 </div>
@@ -807,7 +839,8 @@ elif page == "p5":
                 · 회사 상한이라고 본 E: <b>{E_val:,.0f} 원</b>
                 </div>
                 <div style="font-size:0.9rem;color:#555;">
-                목표 연봉 S보다 <b>{diff_abs:,.0f} 원</b> 만큼 {sign}.
+                목표 연봉 S보다 <b>{diff_abs:,.0f} 원</b> 만큼 {sign}.<br/>
+                (루빈스타인 균형 연봉: 약 {eq_salary:,.0f} 원)
                 </div>
                 </div>""",
                 unsafe_allow_html=True,
@@ -815,40 +848,41 @@ elif page == "p5":
 
             st.markdown("---")
 
-        # ---- 이론적 상태(수학적인 요약)는 익스팬더로 숨김 ----
-        with st.expander("수학적으로 본 현재 상태 (선택사항)", expanded=False):
+        # ---- 수학적 상태(요약)는 선택적으로만 보여주기 ----
+        with st.expander("내부 수학 상태 보기 (선택)", expanded=False):
             st.code(model.summary(), language="text")
+            st.write(f"루빈스타인 균형 연봉 S*: {eq_salary:,.0f} 원")
 
-        # 라운드 다 썼는데 최종 합의가 아직 없을 때
+        # 라운드 소진 + 아직 합의 X
         if s.current_round > s.total_rounds and final_salary is None:
             st.warning(
                 "설정한 최대 라운드 수를 모두 사용했습니다.\n"
                 "아래 협상 기록을 보고, 어느 정도 선에서 합의할지 스스로 결론을 정해 보세요."
             )
 
-        # 아직 라운드가 남아 있고, 최종 합의도 안 정해진 경우에만 새로운 라운드 진행 UI 노출
+        # 아직 라운드 남아 있고, 최종 합의 없을 때만 새 라운드 입력
         if s.current_round <= s.total_rounds and final_salary is None:
-            st.markdown("#### 2단계: 이번 라운드에서 내가 제시할 금액 정하기")
+            st.markdown("#### 2단계: 이번 라운드에서 내가 제시할 금액 입력하기")
 
             st.markdown(
                 f"- 현재 라운드: **{s.current_round} / {s.total_rounds}**  \n"
-                f"- 이론적으로는 내부에서 `'employee' / 'employer'` 턴이 번갈아 돌지만, "
-                f"여기서는 **항상 '내 입장에서 이번에 얼마를 부를지'**만 생각합니다."
+                f"- 이론상 균형 연봉(회사도 받아들일 법한 기준점): **{eq_salary:,.0f} 원**"
             )
 
-            # 🔹 이 라운드에서 이론적으로 괜찮은 제안(모델 추천값) 미리 보기 (state 변경 없이)
+            # 이 라운드에 대한 이론적 추천값 (모형의 휴리스틱 제안) 미리 보기
             try:
                 theory_preview = model._suggest_employee_offer()
             except Exception:
                 theory_preview = S_val
 
             st.info(
-                f"📐 이론 모델 기준, **이번 라운드에서 제안하면 좋은 금액(추천값)** 은 "
-                f"대략 **{theory_preview:,.0f} 원** 정도입니다.\n\n"
-                "아래 입력칸에서 실제로 내가 회사에 부를 금액을 직접 정해 보세요."
+                f"📐 이 모델이 계산한 **이번 라운드 추천 제안금(이론값)** 은 "
+                f"대략 **{theory_preview:,.0f} 원**입니다.\n\n"
+                "하지만 실제 제안은 상황에 따라 다를 수 있으니, "
+                "아래에서 내가 회사에 제시하고 싶은 금액을 직접 정해 보세요."
             )
 
-            # 내가 실제로 제시할 금액
+            # 내가 실제로 회사에 제시할 금액
             my_offer = st.number_input(
                 "이번 라운드에서 실제로 회사에 제시할 연봉 (원)",
                 min_value=float(B_val),
@@ -859,43 +893,37 @@ elif page == "p5":
                 key="my_offer_input",
             )
 
-            # 회사 반응 (내가 시뮬레이션 상으로 선택)
-            reaction = st.selectbox(
-                "회사 반응 (시뮬레이션 상에서 어떻게 반응했다고 볼까요?)",
-                [
-                    "아직 협상 계속 (이 제안은 수락하지 않음)",
-                    "이 제안에 합의하고 협상 종료",
-                ],
-                key="my_offer_reaction",
-            )
-
-            if st.button("이번 라운드 기록하기", key="btn_record_round"):
+            if st.button("이번 라운드 결과 계산 및 기록하기", key="btn_record_round_auto_decide"):
                 try:
-                    # 이 시점에서 실제로 모델을 한 스텝 진행시켜서
-                    # '이론적으로' 이번 라운드 employee 제안값을 기록해 둔다.
+                    # 내부 모델도 한 스텝 진행시켜서 이론 제안값 기록
                     theory_offer = model.next_employee_offer(employer_offer=None)
+
+                    # 회사 반응을 루빈스타인 기준으로 자동 판정:
+                    # my_offer <= 균형임금 S* 이면 수락, 아니면 거절
+                    if my_offer <= eq_salary:
+                        decision = "회사 수락 (이론상 받아들일 만한 수준)"
+                        st.session_state["neg_final_salary"] = float(my_offer)
+                    else:
+                        decision = "회사 거절 (이론상 너무 높은 요구)"
 
                     history = st.session_state.get("neg_history") or []
                     round_no = len(history) + 1
-
                     history.append(
                         {
                             "round": round_no,
                             "my_offer": float(my_offer),
                             "theory_offer": float(theory_offer),
-                            "result": reaction,
+                            "decision": decision,
                         }
                     )
                     st.session_state["neg_history"] = history
                     st.session_state["neg_last_offer"] = float(my_offer)
 
-                    if reaction == "이 제안에 합의하고 협상 종료":
-                        st.session_state["neg_final_salary"] = float(my_offer)
-
                     st.success(
                         f"이번 라운드가 기록되었습니다.\n\n"
                         f"- 내가 실제로 제시한 금액: **{my_offer:,.0f} 원**\n"
-                        f"- 이론 모델이 계산한 이번 라운드 추천값: **{theory_offer:,.0f} 원**"
+                        f"- 이론 모델이 계산한 이번 라운드 추천값: **{theory_offer:,.0f} 원**\n"
+                        f"- 회사 반응(이론상): **{decision}**"
                     )
                     st.rerun()
                 except Exception as e:
@@ -925,11 +953,10 @@ elif page == "p5":
                         h["round"],
                         f"{h['my_offer']:,.0f} 원",
                         f"{h['theory_offer']:,.0f} 원",
-                        h["result"],
+                        h["decision"],
                     ]
                 )
             st.table(table_rows)
-
 
 # ===================== PAGE 4: 초기 연봉 제시 =====================
 elif page == "p4":
