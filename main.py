@@ -519,146 +519,129 @@ elif page == "p3":
             st.rerun()
 
 
-# ===================== PAGE 5: 연봉 협상 시뮬레이터 =====================
+# ===================== PAGE 5: 왔다갔다 협상 라운드 시뮬레이터 =====================
 elif page == "p5":
-    if st.button("뒤로 (연봉협상 메뉴로)", key="back_to_p3_from_p5"):
-        st.session_state["page"] = "p3"
-        st.rerun()
 
-    st.markdown("### 연봉 협상 시뮬레이터")
-    st.caption(
-        "Rubinstein의 교대 제안 모형을 사용해, 나와 회사의 할인 계수(시간에 대한 인내심)에 따라 "
-        "균형 연봉과 협상력을 계산합니다."
-    )
+    st.markdown("### 협상 라운드 시뮬레이터 (왔다갔다 구조)")
+    st.caption("t-3 → t-2 → t-1 → t 구조의 교대 제안 협상 라운드를 실제로 왔다갔다 해볼 수 있습니다.")
 
-    with st.form("negotiation_form"):
-        col1, col2 = st.columns(2)
+    from dataclasses import dataclass
+    from typing import Literal, List
 
-        with col1:
-            min_salary = st.number_input(
-                "나의 최소 수용 연봉 (원)",
-                min_value=1.0,
-                max_value=5_000_000_000.0,
-                value=50_000_000.0,
-                step=1_000_000.0,
-                format="%.0f",
-            )
-            delta_worker = st.slider(
-                "나의 할인 계수 δ_worker (0~1, 1에 가까울수록 인내심 ↑)",
-                min_value=0.50,
-                max_value=0.99,
-                value=0.95,
-                step=0.01,
-            )
+    Actor = Literal["employee", "employer"]
 
-        with col2:
-            max_salary = st.number_input(
-                "회사의 최대 지불 의사 연봉 (원)",
-                min_value=1.0,
-                max_value=5_000_000_000.0,
-                value=80_000_000.0,
-                step=1_000_000.0,
-                format="%.0f",
-            )
-            delta_firm = st.slider(
-                "회사의 할인 계수 δ_firm (0~1, 1에 가까울수록 인내심 ↑)",
-                min_value=0.50,
-                max_value=0.99,
-                value=0.90,
-                step=0.01,
-            )
+    @dataclass
+    class RoundState:
+        round_index: int
+        proposer: Actor
+        W_e: float
+        W_r: float
 
-        submitted_neg = st.form_submit_button("Rubinstein 균형 연봉 계산")
+    class BargainGame:
+        def __init__(self, B, S, E, delta_e, delta_r, first_mover, horizon=3):
+            self.B = B
+            self.S = S
+            self.E = E
+            self.delta_e = delta_e
+            self.delta_r = delta_r
+            self.first_mover = first_mover
+            self.horizon = horizon
 
-    if submitted_neg:
-        try:
-            neg = compute_rubinstein_equilibrium(
-                min_salary=min_salary,
-                max_salary=max_salary,
-                delta_worker=delta_worker,
-                delta_firm=delta_firm,
-            )
-            st.session_state["neg_result"] = neg
-        except Exception as e:
-            st.error(f"오류가 발생했습니다: {e}")
+            self.pie = E - B
+            self.x = (S - B) / self.pie  # employee share at t
 
-    neg = st.session_state["neg_result"]
+        def compute_path(self) -> List[RoundState]:
+            path = []
 
-    if neg:
-        st.markdown("#### 계산 결과")
+            # t
+            W_e = self.x
+            W_r = 1 - W_e
+            path.append(RoundState(0, self.first_mover, W_e, W_r))
 
-        colA, colB, colC = st.columns(3)
-        with colA:
-            st.markdown(
-                f"""<div style="padding:16px;border-radius:12px;border:1px solid #ddd;text-align:center;">
-                균형 연봉 (근로자)<br>
-                <strong style="font-size:1.3rem;">{format_currency(neg['salary_worker'])}</strong>
-                </div>""",
-                unsafe_allow_html=True,
-            )
+            proposer = self.first_mover
 
-        with colB:
-            st.markdown(
-                f"""<div style="padding:16px;border-radius:12px;border:1px solid #ddd;text-align:center;">
-                근로자 몫 비율<br>
-                <strong style="font-size:1.3rem;">{format_percent(neg['share_worker'])}</strong>
-                </div>""",
-                unsafe_allow_html=True,
-            )
+            for step in range(1, self.horizon + 1):
+                if proposer == "employee":
+                    W_r_prev = 1 - self.delta_e * W_e
+                    W_e_prev = 1 - W_r_prev
+                    proposer_prev = "employer"
+                else:
+                    W_e_prev = 1 - self.delta_r * W_r
+                    W_r_prev = 1 - W_e_prev
+                    proposer_prev = "employee"
 
-        with colC:
-            st.markdown(
-                f"""<div style="padding:16px;border-radius:12px;border:1px solid #ddd;text-align:center;">
-                회사 잔여 이득<br>
-                <strong style="font-size:1.3rem;">{format_currency(neg['surplus_firm'])}</strong>
-                </div>""",
-                unsafe_allow_html=True,
-            )
+                path.append(RoundState(-step, proposer_prev, W_e_prev, W_r_prev))
+
+                W_e, W_r, proposer = W_e_prev, W_r_prev, proposer_prev
+
+            path.sort(key=lambda x: x.round_index)
+            return path
+
+        def offer(self, state: RoundState):
+            if state.proposer == "employee":
+                return self.B + self.pie * state.W_e
+            else:
+                return self.B + self.pie * state.W_r
+
+    # 입력 폼
+    with st.form("round_form"):
+        B = st.number_input("최소 수용 연봉 B", 1_000_000, 1_000_000_000, 50_000_000)
+        S = st.number_input("희망 연봉 S", 1_000_000, 1_000_000_000, 65_000_000)
+        E = st.number_input("회사 최대 지불 의사 연봉 E", 1_000_000, 1_000_000_000, 80_000_000)
+
+        delta_e = st.slider("구직자 할인율 δ_E", 0.5, 0.99, 0.95, step=0.01)
+        delta_r = st.slider("고용주 할인율 δ_R", 0.5, 0.99, 0.90, step=0.01)
+
+        first = st.selectbox("t에서 누가 제안하는가?", ["employee", "employer"])
+        horizon = st.number_input("시작 라운드 (예: 3 → t-3)", 1, 10, 3)
+
+        submit = st.form_submit_button("라운드 계산 시작")
+
+    if submit:
+        game = BargainGame(B, S, E, delta_e, delta_r, first, horizon)
+        st.session_state["g_game"] = game
+        st.session_state["g_path"] = game.compute_path()
+        st.session_state["g_idx"] = 0
+
+    if "g_path" in st.session_state:
+        path = st.session_state["g_path"]
+        idx = st.session_state["g_idx"]
+        game = st.session_state["g_game"]
+
+        state = path[idx]
+
+        st.subheader(f"현재 라운드: t{state.round_index}")
+        st.write(f"제안자: **{state.proposer}**")
+
+        st.write(f"W_e (구직자 몫): **{state.W_e:.4f}**")
+        st.write(f"W_r (고용주 몫): **{state.W_r:.4f}**")
+
+        offer = game.offer(state)
+        st.markdown(f"### 💰 이번 라운드 제안 금액: **{offer:,.0f} 원**")
+
+        c1, c2 = st.columns(2)
+
+        if c1.button("⬅ 이전 라운드", disabled=idx == 0):
+            st.session_state["g_idx"] -= 1
+
+        if c2.button("다음 라운드 ➡", disabled=idx == len(path) - 1):
+            st.session_state["g_idx"] += 1
 
         st.markdown("---")
+        st.markdown("### 전체 라운드 요약")
 
-        st.markdown("#### 해석")
-        st.write(
-            f"- 총 협상 파이(회사 최대 지불 의사 연봉 - 나의 최소 수용 연봉)는 "
-            f"`{format_currency(neg['pie'])}` 입니다."
-        )
-        st.write(
-            f"- Rubinstein 균형에서 **근로자**는 파이의 약 "
-            f"**{format_percent(neg['share_worker'])}** 을 가져가며, "
-            f"이는 **{format_currency(neg['salary_worker'])}** 에 해당합니다."
-        )
-        st.write(
-            f"- **회사**는 파이의 나머지 **{format_percent(neg['share_firm'])}** 를 가져가며, "
-            f"이는 최종 연봉 지급 후 회사에 남는 여유분 **{format_currency(neg['surplus_firm'])}** 정도로 볼 수 있습니다."
-        )
+        table = []
+        for stt in path:
+            table.append([
+                f"t{stt.round_index}",
+                stt.proposer,
+                round(stt.W_e, 4),
+                round(stt.W_r, 4),
+                f"{game.offer(stt):,} 원"
+            ])
 
-        with st.expander("수식 자세히 보기"):
-            st.markdown(
-                r"""
-                **Rubinstein 모형 (무한 교대 제안, 파이 크기 = `π`)**
+        st.table(table)
 
-                - 근로자의 할인 계수: `δ_W`
-                - 회사의 할인 계수: `δ_F`
-                - 파이 크기: `π = 회사 최대 지불 의사 연봉 - 나의 최소 수용 연봉`
-
-                근로자의 균형 몫 비율:
-
-                \[
-                v_W(δ_W, δ_F) = \frac{1 - δ_F}{1 - δ_W δ_F}
-                \]
-
-                따라서,
-
-                \[
-                \text{균형 연봉} = \text{최소 수용 연봉} + v_W \times π
-                \]
-
-                이 모형에서는 첫 제안이 곧바로 수락되는 균형이기 때문에,
-                **이 금액이 협상 끝에 도달하는 이론상 최종 연봉**이 됩니다.
-                """
-            )
-    else:
-        st.info("위의 값을 입력하고 'Rubinstein 균형 연봉 계산' 버튼을 눌러 결과를 확인하세요.")
 
 
 # ===================== PAGE 4: 초기 연봉 제시 =====================
