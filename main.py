@@ -817,57 +817,65 @@ elif page == "p5":
 
         s = model.state
 
-        # ---- 결론 카드 (최종 합의가 정해졌을 때) ----
-        final_salary = st.session_state.get("neg_final_salary")
-        if final_salary is not None:
-            st.markdown("#### ✅ 이번 협상의 최종 결론")
+       # ---- 2. 협상 라운드 진행 ----
+model: Optional[NegotiationModel] = st.session_state.get("neg_model")
 
-            diff_from_target = final_salary - S_val
-            sign = "높습니다" if diff_from_target > 0 else "낮습니다" if diff_from_target < 0 else "같습니다"
-            diff_abs = abs(diff_from_target)
+if model is None:
+    st.info("위에서 협상 조건을 입력하고 '협상 시작 (모델 초기화)' 버튼을 먼저 눌러주세요.")
+else:
+    params = st.session_state.get("neg_params") or {}
+    B_val = params.get("B", model.state.B)
+    S_val = params.get("S", model.state.S_target)
+    E_val = params.get("E", model.state.E_max)
+    eq_salary = st.session_state.get("neg_eq_salary", S_val)  # 안전용 기본값
 
- st.markdown(
-    f"""
-    <div style="
-        padding:14px;
-        border-radius:14px;
-        border:2px solid #2c3e50;
-        background-color:#f7f9fc;
-        text-align:center;
-        color:#111;
-        line-height:1.25; /* 줄 간격 줄이기 */
-        max-width:480px;
-        margin:auto;
-    ">
-        
-        <div style="font-size:1.1rem; font-weight:600; margin-bottom:4px;">
-            이번 협상의 최종 합의 연봉
-        </div>
+    s = model.state
 
-        <div style="font-size:2rem; font-weight:800; margin:6px 0;">
-            {final_salary:,.0f} 원
-        </div>
+    # ---- 결론 카드 (최종 합의가 정해졌을 때) ----
+    final_salary = st.session_state.get("neg_final_salary")
+    if final_salary is not None:
+        diff_from_target = final_salary - S_val
+        sign = "높습니다" if diff_from_target > 0 else "낮습니다" if diff_from_target < 0 else "같습니다"
+        diff_abs = abs(diff_from_target)
 
-        <div style="font-size:0.9rem; margin-bottom:2px;">
-            최소 수용 B: <b>{B_val:,.0f}</b> · 목표 S: <b>{S_val:,.0f}</b> · 회사 상한 E: <b>{E_val:,.0f}</b>
-        </div>
+        st.markdown(
+            f"""
+            <div style="
+                padding:14px;
+                border-radius:14px;
+                border:2px solid #2c3e50;
+                background-color:#f7f9fc;
+                text-align:center;
+                color:#111;
+                line-height:1.25;
+                max-width:480px;
+                margin:auto;
+            ">
+                <div style="font-size:1.1rem; font-weight:600; margin-bottom:4px;">
+                    이번 협상의 최종 합의 연봉
+                </div>
 
-        <div style="font-size:0.95rem; font-weight:500; margin-top:10px;">
-            목표 연봉보다 <b>{diff_abs:,.0f} 원</b> 만큼 {sign}.
-        </div>
+                <div style="font-size:2rem; font-weight:800; margin:6px 0;">
+                    {final_salary:,.0f} 원
+                </div>
 
-        <div style="font-size:0.8rem; color:#444; margin-top:4px;">
-            (루빈스타인 균형: 약 {eq_salary:,.0f} 원)
-        </div>
+                <div style="font-size:0.9rem; margin-bottom:2px;">
+                    최소 수용 B: <b>{B_val:,.0f}</b> · 목표 S: <b>{S_val:,.0f}</b> · 회사 상한 E: <b>{E_val:,.0f}</b>
+                </div>
 
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+                <div style="font-size:0.95rem; font-weight:500; margin-top:10px;">
+                    목표 연봉보다 <b>{diff_abs:,.0f} 원</b> 만큼 {sign}.
+                </div>
 
+                <div style="font-size:0.8rem; color:#444; margin-top:4px;">
+                    (루빈스타인 균형: 약 {eq_salary:,.0f} 원)
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-
-            st.markdown("---")
+        st.markdown("---")
 
         # ---- 수학적 상태(요약)는 선택적으로만 보여주기 ----
         with st.expander("내부 수학 상태 보기 (선택)", expanded=False):
