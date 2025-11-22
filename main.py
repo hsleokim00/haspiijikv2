@@ -3,8 +3,7 @@ import requests
 import streamlit as st
 
 from dataclasses import dataclass, field
-from typing import Literal, List, Dict, Optional   # 🔹 Optional 추가
-
+from typing import Literal, List, Dict, Optional
 
 # ===================== 기본 설정 =====================
 st.set_page_config(
@@ -25,10 +24,9 @@ INDUSTRY_GROWTH = {
 }
 INDUSTRY_OPTIONS = list(INDUSTRY_GROWTH.keys())
 
-
 # ===================== NegotiationModel 정의 =====================
 
-# 직종별 고용주 최대 지불 의사 연봉 E_max (예시용; PAGE 4에서는 직접 숫자로 넣어서 사용)
+# 직종별 고용주 최대 지불 의사 연봉 E_max (예시용; 페이지 4에서는 직접 숫자로 넣어서 사용)
 DEFAULT_E_BY_FIELD: Dict[str, float] = {
     "it_dev": 9000.0,
     "medical": 12000.0,
@@ -36,7 +34,6 @@ DEFAULT_E_BY_FIELD: Dict[str, float] = {
     "service": 5000.0,
     "manufacturing": 7000.0,
 }
-
 
 @dataclass
 class NegotiationState:
@@ -75,7 +72,6 @@ class NegotiationState:
         if self.pi <= 0:
             raise ValueError("E_max must be greater than B")
         return (self.S_target - self.B) / self.pi
-
 
 class NegotiationModel:
     """
@@ -251,10 +247,9 @@ class NegotiationModel:
             f"history_employer={s.history_employer}"
         )
 
-
 # ===================== 세션 상태 초기화 =====================
 if "page" not in st.session_state:
-    # p2: 이직 여부 결정, p3: 연봉협상 메뉴, p4: 협상 시뮬레이터, p5/p6: 초기 연봉 제시
+    # p2: 이직 여부 결정, p3: 연봉협상 메뉴, p4: 협상 시뮬레이터
     st.session_state["page"] = "p2"
 
 if "jc_result" not in st.session_state:
@@ -263,11 +258,7 @@ if "jc_result" not in st.session_state:
 if "neg_model" not in st.session_state:
     st.session_state["neg_model"] = None
 
-if "initial_offer_result" not in st.session_state:
-    st.session_state["initial_offer_result"] = None
-
-
-# ===================== 로직 함수들 =====================
+# ===================== 유틸 함수들 =====================
 def fetch_corp_metrics(name: str) -> dict:
     """
     회사 데이터를 가져오되, 어떤 오류가 나도 스트림릿 앱이 죽지 않도록
@@ -329,11 +320,9 @@ def fetch_corp_metrics(name: str) -> dict:
         "error": data.get("error"),
     }
 
-
 def get_industry_growth(industry: str) -> float:
     """산업별 성장률 가져오기. 없는 경우 3% 기본값."""
     return INDUSTRY_GROWTH.get(industry, 0.03)
-
 
 def company_factor(metrics: dict, industry_growth_fallback: float) -> float:
     """
@@ -357,13 +346,11 @@ def company_factor(metrics: dict, industry_growth_fallback: float) -> float:
 
     return growth_component * size_component
 
-
 def format_score(x: float) -> str:
     """점수 포맷: 소수 둘째 자리까지."""
     if not math.isfinite(x):
         return "-"
     return f"{x:.2f}"
-
 
 def compute_job_change(
     years: float,
@@ -448,19 +435,16 @@ def compute_job_change(
         "factor_next": factor_next,
     }
 
-
 def format_currency(x: float) -> str:
     """연봉 숫자 포맷 (원 단위, 천 단위 콤마)."""
     if not math.isfinite(x):
         return "-"
     return f"{int(round(x)):,} 원"
 
-
 def format_percent(x: float) -> str:
     if not math.isfinite(x):
         return "-"
     return f"{x * 100:.1f}%"
-
 
 # ===================== 공통 헤더 =====================
 st.title("피이직대학 이직 상담소")
@@ -472,8 +456,8 @@ elif page == "p3":
     st.subheader("- 연봉협상 메뉴")
 elif page == "p4":
     st.subheader("- 협상 시뮬레이터")
-st.markdown("---")
 
+st.markdown("---")
 
 # ===================== PAGE 2: 이직 여부 결정 =====================
 if page == "p2":
@@ -663,7 +647,6 @@ if page == "p2":
         else:
             st.write("아직 계산된 결과가 없습니다.")
 
-
 # ===================== PAGE 3: 연봉협상 메뉴 =====================
 elif page == "p3":
     if st.button("뒤로 (이직 여부 결정으로)", key="back_to_p2"):
@@ -672,32 +655,18 @@ elif page == "p3":
 
     st.markdown("### 연봉협상 메뉴")
 
-    col1, col2 = st.columns(2)
+    st.markdown(
+        """<div style="padding:16px;border-radius:16px;border:1px solid #ddd;">
+        <h3>협상 시뮬레이터</h3>
+        <p>회사 제안 → 나의 응답을 라운드별로 돌려보며 협상을 연습합니다.</p>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+    if st.button("협상 시뮬레이터 들어가기", key="go_p4"):
+        st.session_state["page"] = "p4"
+        st.rerun()
 
-    with col1:
-        st.markdown(
-            """<div style="padding:16px;border-radius:16px;border:1px solid #ddd;">
-            <h3>협상 시뮬레이터</h3>
-            <p>회사 제안 → 나의 응답을 라운드별로 돌려보며 협상을 연습합니다.</p>
-            </div>""",
-            unsafe_allow_html=True,
-        )
-        if st.button("들어가기", key="go_p4"):
-            st.session_state["page"] = "p4"
-            st.rerun()
-
-    with col2:
-        st.markdown(
-            """<div style="padding:16px;border-radius:16px;border:1px solid #ddd;">
-            <h3>(예비) 초기 연봉 제시</h3>
-            <p>향후 SPE 기반·역진행 기반 최초 제시 연봉 계산 메뉴 자리.</p>
-            </div>""",
-            unsafe_allow_html=True,
-        )
-        # 나중에 page == "p5"/"p6"으로 연결 예정
-
-
-# ===================== PAGE 4: 협상 시뮬레이터 (네 NegotiationModel 기반) =====================
+# ===================== PAGE 4: 협상 시뮬레이터 (NegotiationModel 기반) =====================
 elif page == "p4":
     if st.button("뒤로 (연봉협상 메뉴로)", key="back_to_p3_from_p4"):
         st.session_state["page"] = "p3"
@@ -706,7 +675,7 @@ elif page == "p4":
     st.markdown("### 협상 시뮬레이터 (게임이론 + 휴리스틱)")
     st.caption(
         "루빈스타인 모형에서 출발한 할인율(δ) 아이디어와\n"
-        "네가 설계한 목표 연봉 S, 최소 수용 연봉 B, 직종별 최대 연봉 E_max를 바탕으로\n"
+        "목표 연봉 S, 최소 수용 연봉 B, 직종별 최대 연봉 E_max를 바탕으로\n"
         "라운드별로 '지금 얼마를 제안하면 좋을지'를 계산해 주는 시뮬레이터입니다."
     )
 
@@ -848,10 +817,8 @@ elif page == "p4":
         st.session_state["neg_model"] = None
         st.rerun()
 
-
-# ===================== (아래 클래스들은 건드리지 않고 그대로 둠) ====================
+# ===================== (아래 클래스들은 건드리지 않고 그대로 둠) =====================
 Actor = Literal["employee", "employer"]
-
 
 @dataclass
 class RoundState:
@@ -864,7 +831,6 @@ class RoundState:
     @property
     def is_employee_turn(self) -> bool:
         return self.proposer == "employee"
-
 
 @dataclass
 class SalaryBargainingGame:
