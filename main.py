@@ -1159,95 +1159,36 @@ elif page == "p4":
     else:
         st.info("입력값을 설정한 뒤 'SPE 기준 최초 제시 연봉 계산' 버튼을 눌러 결과를 확인하세요.")
 
-# ===================== PAGE 4: 초기 연봉 제시 (SPE 기반) =====================
+# ===================== PAGE 4: 초기 연봉 제시 (B 기반 SPE 계산) =====================
 elif page == "p4":
-    # 🔙 연봉협상 메뉴로 돌아가기 버튼
+    # 🔙 연봉협상 메뉴로 돌아가기
     if st.button("뒤로 (연봉협상 메뉴로)", key="back_to_p3_from_p4"):
         st.session_state["page"] = "p3"
         st.rerun()
 
-    st.markdown("### 초기 연봉 제시 (SPE 기반)")
+    st.markdown("### 초기 연봉 제시 (루빈스타인 SPE 기반)")
     st.caption(
-        "희망하는 최종 연봉 S*, 회사가 제시할 수 있는 최대 연봉 E, "
-        "구직자/기업의 할인율(δ_E, δ_R)을 기반으로\n"
-        "루빈스타인 모형의 균형 (SPE)이 성립하도록 하는 최소 수용 연봉 B를 역산하고, "
-        "그때의 최초 제시 연봉(=최종 연봉)을 보여줍니다."
+        "나의 최소 수용 연봉 B, 회사가 지불할 수 있는 최대 연봉 E, "
+        "구직자/기업의 할인율(δ_E, δ_R)을 입력하면\n"
+        "루빈스타인 모형의 균형(SPE)에 따라 **최초 제시 연봉(=최종 합의 연봉)**을 계산합니다."
     )
 
-    def compute_spe_from_target(
-        S_target: float,
-        E_max: float,
-        delta_worker: float,
-        delta_firm: float,
-    ):
-        """
-        입력: 목표 최종 연봉 S_target, 회사 최대 연봉 E_max, δ_E, δ_R
-        루빈스타인 SPE 공식:
-            v_W = (1 - δ_R) / (1 - δ_E δ_R)
-            S* = B + v_W (E - B)  (여기서 S* = S_target, E = E_max)
-        를 이용해서 B를 역산:
-            S* = v_W E + (1 - v_W) B
-            (1 - v_W) B = S* - v_W E
-            B = (S* - v_W E) / (1 - v_W)
-        """
-        if S_target <= 0 or E_max <= 0:
-            raise ValueError("연봉은 0보다 커야 합니다.")
-        if not (0 < delta_worker < 1 and 0 < delta_firm < 1):
-            raise ValueError("할인율 δ_E, δ_R은 0과 1 사이여야 합니다.")
-
-        # 근로자 몫 비율 v_W
-        v_W = (1.0 - delta_firm) / (1.0 - delta_worker * delta_firm)
-        v_W = max(0.0, min(1.0, v_W))  # 안전 클램프
-
-        denom = 1.0 - v_W
-        if abs(denom) < 1e-9:
-            raise ValueError("할인율 조합이 v_W ≈ 1이 되어, B를 정의하기 어렵습니다.")
-
-        B = (S_target - v_W * E_max) / denom
-
-        # 일관성 체크: B < S* ≤ E 여야 함
-        if B >= S_target:
-            raise ValueError("이 할인율과 최대 연봉 조합으로는 S*가 최소 수용 연봉보다 높게 설정될 수 없습니다.")
-        if S_target > E_max:
-            raise ValueError("희망 최종 연봉 S*는 회사 최대 연봉 E보다 클 수 없습니다.")
-        if B <= 0:
-            raise ValueError("역산된 최소 수용 연봉 B가 0 이하입니다. 입력값을 다시 조정해 주세요.")
-
-        pie = E_max - B
-        # 이론상 share_worker는 v_W와 일치해야 함
-        share_worker = (S_target - B) / pie
-        share_firm = 1.0 - share_worker
-        firm_surplus = E_max - S_target
-        worker_surplus = S_target - B
-
-        return {
-            "B": B,
-            "E": E_max,
-            "S_target": S_target,
-            "delta_worker": delta_worker,
-            "delta_firm": delta_firm,
-            "share_worker": share_worker,
-            "share_firm": share_firm,
-            "worker_surplus": worker_surplus,
-            "firm_surplus": firm_surplus,
-            # SPE에서 근로자가 먼저 제안하면 최초 제시 연봉 = 최종 연봉 = S*
-            "initial_offer": S_target,
-        }
-
+    # 결과 저장용
     if "initial_offer_result" not in st.session_state:
         st.session_state["initial_offer_result"] = None
 
-    with st.form("initial_offer_form_spe"):
+    with st.form("initial_offer_form_B"):
         col1, col2 = st.columns(2)
+
         with col1:
-            S_target = st.number_input(
-                "희망하는 최종 연봉 S* (원)",
-                min_value=1_000_000.0,
+            min_salary0 = st.number_input(
+                "나의 최소 수용 연봉 B (원)",
+                min_value=1.0,
                 max_value=5_000_000_000.0,
-                value=65_000_000.0,
+                value=50_000_000.0,
                 step=1_000_000.0,
                 format="%.0f",
-                key="S_target",
+                key="min_salary0",
             )
             delta_worker0 = st.slider(
                 "구직자 할인율 δ_E",
@@ -1257,15 +1198,16 @@ elif page == "p4":
                 step=0.01,
                 key="delta_worker0",
             )
+
         with col2:
-            E_max0 = st.number_input(
-                "회사가 오퍼할 수 있는 최대 연봉 E (원)",
-                min_value=1_000_000.0,
+            max_salary0 = st.number_input(
+                "회사의 최대 지불 의사 연봉 E (원)",
+                min_value=1.0,
                 max_value=5_000_000_000.0,
                 value=80_000_000.0,
                 step=1_000_000.0,
                 format="%.0f",
-                key="E_max0",
+                key="max_salary0",
             )
             delta_firm0 = st.slider(
                 "기업 할인율 δ_R",
@@ -1280,9 +1222,10 @@ elif page == "p4":
 
     if submitted_init:
         try:
-            init_res = compute_spe_from_target(
-                S_target=S_target,
-                E_max=E_max0,
+            # 🔹 여기서 위쪽에 이미 정의된 루빈스타인 함수 사용
+            init_res = compute_rubinstein_equilibrium(
+                min_salary=min_salary0,
+                max_salary=max_salary0,
                 delta_worker=delta_worker0,
                 delta_firm=delta_firm0,
             )
@@ -1294,7 +1237,9 @@ elif page == "p4":
     init_res = st.session_state["initial_offer_result"]
 
     if init_res:
-        initial_offer = init_res["initial_offer"]
+        salary_star = init_res["salary_worker"]      # 균형 연봉 = 추천 최초 제시 연봉
+        share_worker = init_res["share_worker"]
+        share_firm = init_res["share_firm"]
 
         # 🔳 검은 상자 + 큰 글씨 UI
         st.markdown(
@@ -1302,13 +1247,13 @@ elif page == "p4":
             <div style="padding:24px;border-radius:18px;border:2px solid #000;
                         background-color:#111;color:#fff;text-align:center;">
                 <div style="font-size:0.95rem;margin-bottom:10px;opacity:0.8;">
-                    SPE(루빈스타인 균형) 기준 추천 최초 제시 연봉
+                    루빈스타인 SPE 기준 추천 최초 제시 연봉
                 </div>
                 <div style="font-size:2rem;font-weight:700;">
-                    {format_currency(initial_offer)}
+                    {format_currency(salary_star)}
                 </div>
                 <div style="margin-top:10px;font-size:0.95rem;opacity:0.9;">
-                    (희망 최종 연봉 S* = {format_currency(init_res['S_target'])})
+                    (이 연봉을 처음 제시하면, 이론상 바로 수락되는 균형입니다.)
                 </div>
             </div>
             """,
@@ -1319,57 +1264,49 @@ elif page == "p4":
         st.markdown("#### 균형 구조 해석")
 
         st.write(
-            f"- 역산된 **최소 수용 연봉 B**: {format_currency(init_res['B'])}  \n"
-            f"- 회사 최대 지불 연봉 E: {format_currency(init_res['E'])}"
+            f"- 최소 수용 연봉 B: {format_currency(min_salary0)}  \n"
+            f"- 회사 최대 지불 연봉 E: {format_currency(max_salary0)}"
         )
         st.write(
-            f"- 근로자 몫 비율: {format_percent(init_res['share_worker'])}  \n"
-            f"- 회사 몫 비율: {format_percent(init_res['share_firm'])}"
+            f"- 근로자 몫 비율: {format_percent(share_worker)}  \n"
+            f"- 회사 몫 비율: {format_percent(share_firm)}"
         )
         st.write(
-            f"- 근로자 잉여 (S* - B): {format_currency(init_res['worker_surplus'])}  \n"
-            f"- 회사 잉여 (E - S*): {format_currency(init_res['firm_surplus'])}"
+            f"- 회사 입장에서는 이 연봉을 제시해도 여전히 약 "
+            f"{format_currency(init_res['surplus_firm'])} 만큼의 여유 잉여가 남습니다."
         )
 
         with st.expander("수식 자세히 보기"):
             st.markdown(
                 r"""
-                **1. 루빈스타인 모형의 SPE (무한 교대제안)**  
+                **1. 파라미터**
 
+                - 최소 수용 연봉: \( B \)  
+                - 회사 최대 지불 연봉: \( E \)  
                 - 구직자 할인율: \( \delta_E \)  
-                - 기업 할인율: \( \delta_R \)  
+                - 기업 할인율: \( \delta_R \)
 
-                근로자 몫 비율 \( v_W \) 는  
+                **2. 루빈스타인 균형에서 근로자 몫**
+
                 \[
                   v_W = \frac{1 - \delta_R}{1 - \delta_E \delta_R}
                 \]
 
-                회사의 최대 지불 연봉을 \( E \), 최소 수용 연봉을 \( B \) 라고 하면,  
-                균형 최종 연봉 \( S^* \) 는
+                이 값은 **근로자가 전체 파이 \( \pi = E - B \)** 에서 가져가는 비율입니다.
+
+                **3. 균형 최종 연봉(=최초 제시 연봉)**
+
                 \[
-                  S^* = B + v_W (E - B)
+                  S^* = B + v_W \cdot (E - B)
                 \]
 
-                **2. 이번 계산기에서 하는 일**
-
-                사용자가
-                - 희망 최종 연봉 \( S^* \),
-                - 회사 최대 연봉 \( E \),
-                - \( \delta_E, \delta_R \)
-
-                를 정해 주면, 위 식을 **역으로 풀어** \( B \) 를 구합니다.
-                \[
-                  S^* = v_W E + (1 - v_W) B
-                \Rightarrow
-                  B = \frac{S^* - v_W E}{1 - v_W}
-                \]
-
-                이렇게 얻은 \( B \) 에 대해 루빈스타인 SPE를 적용하면,  
-                **근로자가 처음 제시하는 연봉 = 최종 연봉 = \( S^* \)** 가 됩니다.
+                루빈스타인 모형에서 근로자가 먼저 제안한다고 가정하면,  
+                **첫 제안이 곧바로 수락되는 균형**이므로  
+                이 \( S^* \)가 바로 **추천 최초 제시 연봉**이 됩니다.
                 """
             )
     else:
-        st.info("입력값을 설정한 뒤 'SPE 기준 최초 제시 연봉 계산' 버튼을 눌러 결과를 확인하세요.")
+        st.info("나의 최소 수용 연봉 B, 회사 최대 연봉 E, 할인율 δ_E / δ_R을 입력한 뒤 계산 버튼을 눌러주세요.")
 
 
 # ===================== (아래 클래스들은 건드리지 않고 그대로 둠) ====================
