@@ -826,25 +826,45 @@ elif page == "p5":
             sign = "높습니다" if diff_from_target > 0 else "낮습니다" if diff_from_target < 0 else "같습니다"
             diff_abs = abs(diff_from_target)
 
-            st.markdown(
-                f"""<div style="padding:20px;border-radius:16px;border:2px solid #2c3e50;
-                background-color:#f7f9fc;text-align:center;">
-                <div style="font-size:0.9rem;margin-bottom:6px;">이번 협상에서 결정된 최종 합의 연봉</div>
-                <div style="font-size:1.8rem;font-weight:bold;margin-bottom:6px;">
-                {final_salary:,.0f} 원
-                </div>
-                <div style="font-size:0.9rem;margin-bottom:4px;">
-                · 나의 최소 수용 연봉 B: <b>{B_val:,.0f} 원</b><br/>
-                · 내가 원했던 목표 연봉 S: <b>{S_val:,.0f} 원</b><br/>
-                · 회사 상한이라고 본 E: <b>{E_val:,.0f} 원</b>
-                </div>
-                <div style="font-size:0.9rem;color:#555;">
-                목표 연봉 S보다 <b>{diff_abs:,.0f} 원</b> 만큼 {sign}.<br/>
-                (루빈스타인 균형 연봉: 약 {eq_salary:,.0f} 원)
-                </div>
-                </div>""",
-                unsafe_allow_html=True,
-            )
+          st.markdown(
+    f"""
+    <div style="
+        padding:14px;
+        border-radius:14px;
+        border:2px solid #2c3e50;
+        background-color:#f7f9fc;
+        text-align:center;
+        color:#111;
+        line-height:1.25; /* 줄 간격 줄이기 */
+        max-width:480px;
+        margin:auto;
+    ">
+        
+        <div style="font-size:1.1rem; font-weight:600; margin-bottom:4px;">
+            이번 협상의 최종 합의 연봉
+        </div>
+
+        <div style="font-size:2rem; font-weight:800; margin:6px 0;">
+            {final_salary:,.0f} 원
+        </div>
+
+        <div style="font-size:0.9rem; margin-bottom:2px;">
+            최소 수용 B: <b>{B_val:,.0f}</b> · 목표 S: <b>{S_val:,.0f}</b> · 회사 상한 E: <b>{E_val:,.0f}</b>
+        </div>
+
+        <div style="font-size:0.95rem; font-weight:500; margin-top:10px;">
+            목표 연봉보다 <b>{diff_abs:,.0f} 원</b> 만큼 {sign}.
+        </div>
+
+        <div style="font-size:0.8rem; color:#444; margin-top:4px;">
+            (루빈스타인 균형: 약 {eq_salary:,.0f} 원)
+        </div>
+
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 
             st.markdown("---")
 
