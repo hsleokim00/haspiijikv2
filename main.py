@@ -2,6 +2,10 @@ import math
 import requests
 import streamlit as st
 
+from dataclasses import dataclass, field
+from typing import Literal, List, Dict
+
+
 # ===================== 기본 설정 =====================
 st.set_page_config(
     page_title="피이직대학 이직 상담소",
@@ -787,3 +791,158 @@ elif page == "p4":
             )
     else:
         st.info("입력값을 설정한 뒤 '최적 최초 제시 연봉 계산' 버튼을 눌러 결과를 확인하세요.")
+
+Actor = Literal["employee", "employer"]
+
+
+@dataclass
+class RoundState:
+    """한 라운드의 균형 상태"""
+    round_index: int          # t, t-1, t-2 ... 같은 상대적 인덱스 (0이 최종 t)
+    proposer: Actor           # 이 라운드에서 제안하는 쪽
+    W_e: float                # 이 라운드에서 구직자가 가져가는 파이의 비율
+    W_r: float                # 이 라운드에서 고용주가 가져가는 파이의 비율
+
+    @property
+    def is_employee_turn(self) -> bool:
+        return self.proposer == "employee"
+
+
+@dataclass
+class SalaryBargainingGame:
+    # ----- 입력 파라미터 -----
+    B: float                 # 최소 허용 연봉
+    S: float                 # 희망 연봉
+    E: float                 # 고용주 최대 연봉
+    delta_e: float           # 구직자 할인율 δ_E
+    delta_r: float           # 고용주 할인율 δ_R
+    first_mover: Actor       # 협상 시작 시 첫 제안자
+    horizon: int = 3         # t 기준으로 몇 단계 앞에서 시작할지 (t-3, t-4 등)
+
+    # 관찰된 오퍼를 저장(나중에 δ 추정에 활용)
+    offer_history: List[Dict] = field(default_factory=list)
+
+    # ----- 기본 유효성 검사 -----
+    def __post_init__(self) -> None:
+        if not (self.B < self.S <= self.E):
+            raise ValueError("B < S ≤ E 관계가 성립해야 합니다.")
+        if not (0 < self.delta_e <= 1 and 0 < self.delta_r <= 1):
+            raise ValueError("할인율(delta_e, delta_r)은 0과 1 사이여야 합니다.")
+
+    # ----- 편의 속성 -----
+    @property
+    def pie(self) -> float:
+        """협상의 전체 파이 π = E - B"""
+        return self.E - self.B
+
+    @property
+    def x_target(self) -> float:
+        """
+        최종 시점 t에서 구직자가 가져가고자 하는 파이의 비율 x.
+        사진에서 x = (S - B) / π.
+        """
+        return (self.S - self.B) / self.pie
+
+    # ----- 핵심: 뒤로 거슬러 올라가며 균형 share 계산 -----
+    def compute_equilibrium_path(
+        self,
+        last_mover: Actor = "employee",
+    ) -> List[RoundState]:
+        """
+        t 시점(라운드 index=0)의 구직자 몫을 x_target으로 놓고,
+        사진에 있는 재귀식(교대로 1 - δ * 상대 몫)을 사용해서
+        t-1, t-2, ... 까지 W_e, W_r를 역산한다.
+        """
+        # 마지막 라운드 t에서의 몫 (사진: W_E(t) = x)
+        W_e = self.x_target
+        W_r = 1.0 - W_e
+        states: List[RoundState] = [
+            RoundState(round_index=0, proposer=last_mover, W_e=W_e, W_r=W_r)
+        ]
+
+        proposer = last_mover
+
+        # horizon 단계만큼 t-1, t-2 ... 를 역산
+        for step in range(1, self.horizon + 1):
+            if proposer == "employee":
+                # 바로 이전 라운드에서는 고용주가 제안
+                # WR_prev = 1 - δ_E * WE_next
+                W_r_prev = 1.0 - self.delta_e * W_e
+                W_e_prev = 1.0 - W_r_prev
+                proposer_prev: Actor = "employer"
+            else:
+                # 바로 이전 라운드에서는 구직자가 제안
+                # WE_prev = 1 - δ_R * WR_next
+                W_e_prev = 1.0 - self.delta_r * W_r
+                W_r_prev = 1.0 - W_e_prev
+                proposer_prev = "employee"
+
+            states.append(
+                RoundState(
+                    round_index=-step,
+                    proposer=proposer_prev,
+                    W_e=W_e_prev,
+                    W_r=W_r_prev,
+                )
+            )
+
+            # 다음 step을 위해 업데이트
+            W_e, W_r, proposer = W_e_prev, W_r_prev, proposer_prev
+
+        # round_index 기준으로 정렬 (t-3, t-2, t-1, t 순)
+        states.sort(key=lambda s: s.round_index)
+        return states
+
+    # ----- 지금 라운드에서 연봉 제안 추천 -----
+    def recommend_employee_offer(
+        self,
+        current_round_index: int,
+        current_proposer: Actor,
+    ) -> float:
+        """
+        current_round_index: t 기준 상대 index (예: t-3 -> -3, t-1 -> -1, t -> 0)
+        current_proposer: 현재 제안하는 쪽 ("employee" 또는 "employer")
+
+        반환값: 구직자가 '지금' 제안해야 할 연봉 (현재가 구직자 차례일 때).
+        지금은 고용주 차례라면, 다음에 구직자가 제안할 때의 추천 연봉을 반환.
+        """
+        path = self.compute_equilibrium_path(
+            last_mover="employee"  # 사진 구조: t에서 구직자가 제안
+        )
+
+        # path에서 현재 또는 다음 구직자 차례 찾기
+        if current_proposer == "employee":
+            candidate = max(
+                (st for st in path if st.round_index == current_round_index),
+                key=lambda st: st.round_index,
+            )
+        else:
+            # 지금은 고용주 차례 → 그 다음 구직자 차례
+            candidate = max(
+                (st for st in path
+                 if st.round_index >= current_round_index
+                 and st.proposer == "employee"),
+                key=lambda st: st.round_index,
+            )
+
+        W_e_now = candidate.W_e
+        suggested_salary = self.B + self.pie * W_e_now
+        return suggested_salary
+
+    # ----- 관찰된 오퍼 기록 (나중에 δ 추정용) -----
+    def record_offer(self, proposer: Actor, salary: float, round_index: int) -> None:
+        self.offer_history.append(
+            {
+                "proposer": proposer,
+                "salary": salary,
+                "round_index": round_index,
+                "share_for_employee": (salary - self.B) / self.pie,
+            }
+        )
+
+    def update_deltas_from_history(self) -> None:
+        """
+        TODO: 고용주 오퍼들을 바탕으로 delta_e, delta_r를
+        추정/업데이트하는 로직을 나중에 여기에 구현.
+        """
+        pass
