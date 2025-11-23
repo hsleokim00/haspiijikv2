@@ -1173,65 +1173,67 @@ elif page == "p4":
             st.error(f"제안 계산 중 오류가 발생했다: {e}")
 
        # 🔽 라운드별 할인율 변화 타임라인 출력 (가독성 개선)
+        # 🔽 라운드별 할인율 변화 타임라인 출력 (가독성 개선)
     if hasattr(neg_model, "delta_history") and len(neg_model.delta_history) > 0:
         st.markdown("### 📘 라운드별 할인율 변화 타임라인")
 
+        # ⚠️ 맨 앞에 공백 없이 바로 <style> 로 시작해야 코드 블록이 아니라 HTML로 렌더링됨
         timeline_html = """
-        <style>
-            .timeline {
-                border-left: 3px solid #bbb;
-                margin-left: 10px;
-                padding-left: 18px;
-            }
-            .timeline-entry {
-                margin-bottom: 16px;
-                position: relative;
-                padding: 8px 12px;
-                border-radius: 10px;
-                background-color: #f7f7f9;
-                box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-            }
-            .timeline-entry:before {
-                content: "";
-                position: absolute;
-                left: -14px;
-                top: 14px;
-                width: 10px;
-                height: 10px;
-                border-radius: 50%;
-                background-color: #4f46e5;
-            }
-            .timeline-round {
-                font-weight: 600;
-                font-size: 0.98rem;
-                margin-bottom: 4px;
-            }
-            .timeline-body {
-                font-size: 0.9rem;
-                color: #444;
-            }
-        </style>
-        <div class="timeline">
-        """
+<style>
+.timeline {
+    border-left: 3px solid #bbb;
+    margin-left: 10px;
+    padding-left: 18px;
+}
+.timeline-entry {
+    margin-bottom: 16px;
+    position: relative;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background-color: #f7f7f9;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+.timeline-entry:before {
+    content: "";
+    position: absolute;
+    left: -14px;
+    top: 14px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: #4f46e5;
+}
+.timeline-round {
+    font-weight: 600;
+    font-size: 0.98rem;
+    margin-bottom: 4px;
+}
+.timeline-body {
+    font-size: 0.9rem;
+    color: #444;
+}
+</style>
+<div class="timeline">
+"""
 
         for item in neg_model.delta_history:
             proposer_kor = "구직자" if item["proposer"] == "employee" else "회사"
             timeline_html += f"""
-            <div class="timeline-entry">
-                <div class="timeline-round">
-                    Round {item['round']} — 제안자: {proposer_kor}
-                </div>
-                <div class="timeline-body">
-                    δ_E(구직자) = {item['delta_E']:.3f},&nbsp;
-                    δ_R(회사) = {item['delta_R']:.3f}
-                </div>
-            </div>
-            """
+<div class="timeline-entry">
+    <div class="timeline-round">
+        Round {item['round']} — 제안자: {proposer_kor}
+    </div>
+    <div class="timeline-body">
+        δ_E(구직자) = {item['delta_E']:.3f},&nbsp;
+        δ_R(회사) = {item['delta_R']:.3f}
+    </div>
+</div>
+"""
 
         timeline_html += "</div>"
 
-        # ✅ HTML을 실제로 렌더링하도록 설정
         st.markdown(timeline_html, unsafe_allow_html=True)
+
 
     # 6) 세션 리셋 버튼 (협상 상태만 리셋)
     if st.button("🔄 협상 세션 리셋", key="reset_neg_model"):
