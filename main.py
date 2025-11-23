@@ -748,8 +748,8 @@ elif page == "p4":
     neg_model: Optional[NegotiationModel] = st.session_state.get("neg_model")
 
     # 2) 협상 기본 설정 폼
-    #    👉 이제는 first_mover / total_rounds는 여기서 안 고르고,
-    #       위에서 선택한 것을 그대로 사용합니다.
+    #    👉 first_mover가 employee면 기존처럼 할인율 슬라이더 노출
+    #       first_mover가 employer면 할인율은 x = (S-B)/π 기반으로 자동 계산하고 UI에서는 숨김
     with st.expander("🔧 협상 기본 설정", expanded=(neg_model is None)):
         with st.form("neg_init_form"):
             col1, col2 = st.columns(2)
@@ -776,38 +776,74 @@ elif page == "p4":
                     options=list(DEFAULT_E_BY_FIELD.keys()),
                     index=0,
                 )
-                delta_E_default = st.slider(
-                    "초기 구직자 할인율 δ_E",
-                    min_value=0.50,
-                    max_value=0.99,
-                    value=0.95,
-                    step=0.01,
-                )
-                delta_R_default = st.slider(
-                    "초기 회사 할인율 δ_R",
-                    min_value=0.50,
-                    max_value=0.99,
-                    value=0.95,
-                    step=0.01,
-                )
+
+                if first_mover == "employee":
+                    # ✅ 구직자 선제일 때: 기존 UI 그대로 (슬라이더 노출)
+                    delta_E_default = st.slider(
+                        "초기 구직자 할인율 δ_E",
+                        min_value=0.50,
+                        max_value=0.99,
+                        value=0.95,
+                        step=0.01,
+                    )
+                    delta_R_default = st.slider(
+                        "초기 회사 할인율 δ_R",
+                        min_value=0.50,
+                        max_value=0.99,
+                        value=0.95,
+                        step=0.01,
+                    )
+                else:
+                    # ✅ 고용자 선제일 때: 할인율은 x = (S-B)/π를 이용해 자동 계산
+                    st.markdown(
+                        "δ_E, δ_R(구직자/회사 할인율)은  \n"
+                        "**S, B, E_max와 x = (S−B)/π** 관계식을 이용해 "
+                        "모형이 자동으로 계산합니다."
+                    )
+                    # 폼 내부에서는 일단 None으로 두고, 아래 submitted 블록에서 실제 값 계산
+                    delta_E_default = None
+                    delta_R_default = None
 
             submitted = st.form_submit_button("새 협상 세션 시작")
 
         if submitted:
             try:
+                # 🔹 first_mover에 따라 할인율 결정 방식 분기
+                if first_mover == "employee":
+                    # 구직자 선제: 사용자가 슬라이더로 정한 값 그대로 사용
+                    delta_e = float(delta_E_default)
+                    delta_r = float(delta_R_default)
+                else:
+                    # 고용자 선제: 이미지에서 정의한 x = (S-B)/π를 이용해 자동 계산
+                    E_max = DEFAULT_E_BY_FIELD[field_name]
+                    pie = max(E_max - B, 1e-9)     # π = E - B
+                    x = (S_target - B) / pie       # x = (S - B) / π
+                    x = max(0.0, min(x, 1.0))      # 0 ≤ x ≤ 1로 클램프
+
+                    # 👉 x가 클수록(= 구직자가 파이에서 많이 가져가고 싶을수록)
+                    #    구직자는 조금 덜 인내적, 회사는 조금 더 인내적이라고 가정
+                    #    (0.90 ~ 0.99 범위 안에서 변화)
+                    delta_e = 0.90 + 0.09 * (1.0 - x)  # 구직자 할인율 δ_E
+                    delta_r = 0.90 + 0.09 * x          # 회사 할인율   δ_R
+
                 model = NegotiationModel(
                     S=S_target,
                     B=B,
                     field_name=field_name,
-                    first_mover=first_mover,                  # 🔹 위에서 고른 값 사용
-                    total_rounds=int(total_rounds_default),    # 🔹 위에서 정한 3 또는 4 사용
+                    first_mover=first_mover,
+                    total_rounds=int(total_rounds_default),
                     E_table=DEFAULT_E_BY_FIELD,
-                    delta_E_default=delta_E_default,
-                    delta_R_default=delta_R_default,
+                    delta_E_default=delta_e,
+                    delta_R_default=delta_r,
                 )
                 st.session_state["neg_model"] = model
                 neg_model = model
-                st.success("✅ 새 협상 세션이 초기화되었습니다.")
+                st.success(
+                    "✅ 새 협상 세션이 초기화되었습니다.\n\n"
+                    f"- 첫 제안자: **{human_label}**  \n"
+                    f"- δ_E(구직자 할인율): **{model.state.delta_E:.3f}**  \n"
+                    f"- δ_R(회사 할인율): **{model.state.delta_R:.3f}**"
+                )
             except Exception as e:
                 st.error(f"협상 모델 초기화 중 오류가 발생했습니다: {e}")
 
