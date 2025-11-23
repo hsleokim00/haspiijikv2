@@ -1172,7 +1172,7 @@ elif page == "p4":
         except Exception as e:
             st.error(f"제안 계산 중 오류가 발생했다: {e}")
 
-    # 🔽 라운드별 할인율 변화 타임라인 출력 (🔴 가독성 개선)
+       # 🔽 라운드별 할인율 변화 타임라인 출력 (가독성 개선)
     if hasattr(neg_model, "delta_history") and len(neg_model.delta_history) > 0:
         st.markdown("### 📘 라운드별 할인율 변화 타임라인")
 
@@ -1229,6 +1229,8 @@ elif page == "p4":
             """
 
         timeline_html += "</div>"
+
+        # ✅ HTML을 실제로 렌더링하도록 설정
         st.markdown(timeline_html, unsafe_allow_html=True)
 
     # 6) 세션 리셋 버튼 (협상 상태만 리셋)
