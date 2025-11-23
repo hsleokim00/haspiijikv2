@@ -188,7 +188,31 @@ class NegotiationModel:
                 offer = max_anchor
         # 7) 최종적으로 [B, E_max] 범위로 한 번 더 클램프
         offer = max(s.B, min(offer, s.E_max))
+
+        # 8) 단조 감소 + 최소 양보율 적용
+        #    - 이전에 내가 낸 오퍼가 있다면:
+        #      1) 이번 오퍼가 이전 값보다 커지지 않게 막고
+        #      2) 최소 한 번당 min_concession_rate 비율만큼은 양보하도록 유도
+        if s.history_employee:
+            prev = s.history_employee[-1]
+
+            # (1) 이론값이 너무 높게 나오면, 일단 이전 값 이하로 제한
+            raw_offer = min(offer, prev)
+
+            # (2) 최소 양보율 (예: 0.5% 양보)
+            min_concession_rate = 0.005  # 0.5% 양보
+
+            # 이전 오퍼에서 최소 0.5%는 깎은 값
+            target_offer = prev * (1 - min_concession_rate)
+
+            # (3) 너무 많이 내려가지도 않게, 그리고 B보다 내려가지 않게 클램프
+            #     - raw_offer: 이론이 허용한 범위 안의 값
+            #     - target_offer: "그래도 이 정도는 양보하자" 기준값
+            #     둘 중 더 큰 값을 쓰되, B보다 낮아지진 않도록 한다.
+            offer = max(s.B, max(raw_offer, target_offer))
+
         return offer
+
     # 4) 한 턴 진행: (필요하면 employer 오퍼 먼저 넣고) 내 제안 계산
     def next_employee_offer(self, employer_offer: Optional[float] = None) -> float:
         """
