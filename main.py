@@ -173,6 +173,7 @@ class NegotiationModel:
     def _suggest_employee_offer(self) -> float:
         s = self.state
 
+        # 1) 루빈스타인 기반 게임 생성
         game = SalaryBargainingGame(
             B=s.B,
             S=s.S_target,
@@ -180,49 +181,52 @@ class NegotiationModel:
             delta_e=s.delta_E,
             delta_r=s.delta_R,
             first_mover=s.first_mover,
-            horizon=s.remaining_rounds()
+            horizon=s.remaining_rounds(),   # 남은 라운드 수만큼 역산
         )
 
-        path = game.compute_equilibrium_path(last_mover="employee")
+        # 2) 타임라인 상에서 마지막 제안자는 회사(employer)로 가정
+        path = game.compute_equilibrium_path(last_mover="employer")
 
+        # 3) 현재 라운드에 대응되는 round_index 계산
+        #    남은 라운드가 r개라면, 지금은 t-(r-1) 에 해당
         current_index = -(s.remaining_rounds() - 1)
 
-        candidate = next(
-            stt for stt in path
-            if stt.round_index == current_index and stt.proposer == "employee"
-        )
-
-        offer = s.B + s.pi * candidate.W_e
-        return max(s.B, min(offer, s.E_max))
-
-
-        # --- 2) 루빈스타인 게임 객체 생성 ---
-        game = SalaryBargainingGame(
-            B=s.B,
-            S=s.S_target,
-            E=s.E_max,
-            delta_e=s.delta_E,
-            delta_r=s.delta_R,
-            first_mover=s.first_mover,
-            horizon=remaining,
-        )
-
-        # --- 3) 균형 경로 계산 ---
-        path = game.compute_equilibrium_path(last_mover=last_mover)
-
-        # --- 4) employee가 제안하는 라운드 하나 선택 ---
+        # 4) 그 index에서 employee가 제안하는 상태 찾기
+        #    (혹시 못 찾으면 가장 t에 가까운 employee state로 fallback)
         try:
-            candidate = next(stt for stt in path if stt.proposer == "employee")
+            candidate = next(
+                stt for stt in path
+                if stt.round_index == current_index and stt.proposer == "employee"
+            )
         except StopIteration:
-            # 이론상 거의 없지만, 방어적으로 S_target 근처로
-            return max(s.B, min(s.S_target, s.E_max))
+            employee_states = [stt for stt in path if stt.proposer == "employee"]
+            if not employee_states:
+                # 이론적으로 거의 없지만, 방어적으로 S_target 근처 반환
+                return max(s.B, min(s.S_target, s.E_max))
+            candidate = max(employee_states, key=lambda stt: stt.round_index)
 
-        # --- 5) W_e 비율 → 실제 연봉 변환 ---
-        raw_offer = s.B + s.pi * candidate.W_e
+        # 5) 이론적인 제안 연봉 (루빈스타인 균형 값)
+        offer_theoretical = s.B + s.pi * candidate.W_e
+        offer_theoretical = max(s.B, min(offer_theoretical, s.E_max))
 
-        # --- 6) [B, E_max] 범위 클램프 ---
-        offer = max(s.B, min(raw_offer, s.E_max))
+        # 6) 현실 보정: "첫 employee 오퍼"일 때만
+        #    → S_target보다 "조금 더 높은 구간"에서 시작하도록 앵커링
+        offer = offer_theoretical
+
+        if len(s.history_employee) == 0:
+            # S보다 약간 더 높은 범위 설정 (예: +3% ~ +15%)
+            min_anchor = s.S_target * 1.03
+            max_anchor = min(s.S_target * 1.15, s.E_max)
+
+            if offer < min_anchor:
+                offer = min_anchor
+            elif offer > max_anchor:
+                offer = max_anchor
+
+        # 7) 최종적으로 [B, E_max] 범위로 한 번 더 클램프
+        offer = max(s.B, min(offer, s.E_max))
         return offer
+
 
     # 4) 한 턴 진행: (필요하면 employer 오퍼 먼저 넣고) 내 제안 계산
     def next_employee_offer(self, employer_offer: Optional[float] = None) -> float:
