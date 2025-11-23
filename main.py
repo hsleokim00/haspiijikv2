@@ -1002,7 +1002,8 @@ elif page == "p4":
                         value=0.95,
                         step=0.01,
                     )
-                     delta_R_default = st.slider(
+                    
+                    delta_R_default = st.slider(
                         "초기 회사 할인율 δ_R",
                         min_value=0.50,
                         max_value=0.99,
