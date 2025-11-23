@@ -129,6 +129,8 @@ class NegotiationModel:
             )
 
         self.state = state
+        # 🔹 라운드별 할인율 로그 저장용
+        self.delta_history: List[Dict[str, float]] = []
 
     # 1) 고용주 오퍼 관찰 -> 상태 & 할인율 업데이트
     def observe_employer_offer(self, offer: float) -> None:
@@ -236,6 +238,7 @@ class NegotiationModel:
         while self.current_player() != "employee" and s.current_round <= s.total_rounds:
             s.current_round += 1
 
+        # 라운드 다 썼으면 더 이상 진행 X
         if s.current_round > s.total_rounds:
             return max(s.B, min(s.S_target, s.E_max))
 
@@ -243,10 +246,20 @@ class NegotiationModel:
         offer = self._suggest_employee_offer()
         s.history_employee.append(offer)
 
+        # 🔹 라운드별 할인율/제안자 로그 기록 (타임라인용)
+        self.delta_history.append({
+            "round": s.current_round,
+            "delta_E": s.delta_E,
+            "delta_R": s.delta_R,
+            "proposer": self.current_player(),  # 이 라운드 제안자
+        })
+
         # 4) 이 라운드 사용 완료 -> 다음 라운드로
         s.current_round += 1
 
         return offer
+
+
 
     # 5) 디버깅/로그용: 현재 상태 요약
     def summary(self) -> str:
@@ -933,12 +946,47 @@ elif page == "p4":
 
         except Exception as e:
             st.error(f"제안 계산 중 오류가 발생했습니다: {e}")
+    
+        # 🔽 라운드별 할인율 변화 타임라인 출력
+    if hasattr(neg_model, "delta_history") and len(neg_model.delta_history) > 0:
+        st.markdown("### 📘 라운드별 할인율 변화 타임라인")
+
+        timeline_html = """
+        <style>
+            .timeline {border-left: 3px solid #bbb; margin-left: 20px; padding-left: 20px;}
+            .entry {margin-bottom: 20px; position: relative;}
+            .entry:before {
+                content: "●";
+                position: absolute;
+                left: -22px;
+                top: 0px;
+                font-size: 18px;
+            }
+            .round-title {font-weight: bold; font-size: 1.05rem;}
+            .delta-text {margin-top: 4px; color: #444; font-size: 0.95rem;}
+        </style>
+        <div class="timeline">
+        """
+
+        for item in neg_model.delta_history:
+            timeline_html += f"""
+            <div class="entry">
+                <div class="round-title">Round {item['round']} — {item['proposer']}</div>
+                <div class="delta-text">
+                    δ_E = {item['delta_E']:.3f},  δ_R = {item['delta_R']:.3f}
+                </div>
+            </div>
+            """
+
+        timeline_html += "</div>"
+
+        st.markdown(timeline_html, unsafe_allow_html=True)
 
 
     # 6) 세션 리셋 버튼 (협상 상태만 리셋)
-        if st.button("🔄 협상 세션 리셋", key="reset_neg_model"):
-            st.session_state["neg_model"] = None
-            st.rerun()
+    if st.button("🔄 협상 세션 리셋", key="reset_neg_model"):
+        st.session_state["neg_model"] = None
+        st.rerun()
 
 # ===================== (아래 클래스들은 건드리지 않고 그대로 둠) =====================
 Actor = Literal["employee", "employer"]
@@ -991,40 +1039,57 @@ class SalaryBargainingGame:
         last_mover: Actor = "employee",
     ) -> List[RoundState]:
         """
-        t 시점(라운드 index=0)의 구직자 몫을 x_target으로 놓고,
-        교대로 1 - δ * 상대 몫을 적용해 t-1, t-2 ... 를 역산.
+        사진 속 식 기반:
+        - x = (S - B) / π 를 t 시점 구직자 몫 W_E(t)로 두고
+        - t, t-1, t-2 ... 로 역진행하면서
+          고용주/구직자 라운드마다
+          W_R = 1 - δ_E * W_E_next  또는
+          W_E = 1 - δ_R * W_R_next
+          를 번갈아 적용한다.
         """
-        W_e = self.x_target
-        W_r = 1.0 - W_e
+        # 최종 시점 t에서의 구직자 몫 (x), 고용주 몫
+        W_e_next = self.x_target          # x = (S - B) / π
+        W_r_next = 1.0 - W_e_next
+
         states: List[RoundState] = [
-            RoundState(round_index=0, proposer=last_mover, W_e=W_e, W_r=W_r)
+            RoundState(round_index=0, proposer=last_mover, W_e=W_e_next, W_r=W_r_next)
         ]
 
-        proposer = last_mover
+        proposer = last_mover  # t 시점 제안자
 
+        # t-1, t-2, ... 역진행
         for step in range(1, self.horizon + 1):
             if proposer == "employee":
-                W_r_prev = 1.0 - self.delta_e * W_e
-                W_e_prev = 1.0 - W_r_prev
+                # 바로 이전 라운드는 고용주 제안 라운드
+                # W_R(t-1) = 1 - δ_E * W_E(t)
+                W_r = 1.0 - self.delta_e * W_e_next
+                # W_E(t-1) = 1 - W_R(t-1)
+                W_e = 1.0 - W_r
                 proposer_prev: Actor = "employer"
             else:
-                W_e_prev = 1.0 - self.delta_r * W_r
-                W_r_prev = 1.0 - W_e_prev
+                # proposer == "employer" → 이전 라운드는 구직자 제안 라운드
+                # W_E(t-1) = 1 - δ_R * W_R(t)
+                W_e = 1.0 - self.delta_r * W_r_next
+                # W_R(t-1) = 1 - W_E(t-1)
+                W_r = 1.0 - W_e
                 proposer_prev = "employee"
 
             states.append(
                 RoundState(
                     round_index=-step,
                     proposer=proposer_prev,
-                    W_e=W_e_prev,
-                    W_r=W_r_prev,
+                    W_e=W_e,
+                    W_r=W_r,
                 )
             )
 
-            W_e, W_r, proposer = W_e_prev, W_r_prev, proposer_prev
+            # 다음 역진행 스텝 준비 (t-1 → t-2 ...)
+            W_e_next, W_r_next, proposer = W_e, W_r, proposer_prev
 
+        # round_index 기준으로 정렬해서 반환
         states.sort(key=lambda s: s.round_index)
         return states
+
 
     def recommend_employee_offer(
         self,
