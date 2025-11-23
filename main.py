@@ -171,25 +171,30 @@ class NegotiationModel:
 
     # 3) employee 턴일 때, 지금 얼마를 제안할지 계산
     def _suggest_employee_offer(self) -> float:
-        """
-        루빈스타인 게임의 균형 경로를 이용해서
-        '지금 라운드에서 직원이 제시해야 할 연봉'을 계산한다.
-        """
         s = self.state
-        remaining = s.remaining_rounds()
 
-        # 남은 라운드 없으면 fallback
-        if remaining <= 0:
-            return max(s.B, min(s.S_target, s.E_max))
+        game = SalaryBargainingGame(
+            B=s.B,
+            S=s.S_target,
+            E=s.E_max,
+            delta_e=s.delta_E,
+            delta_r=s.delta_R,
+            first_mover=s.first_mover,
+            horizon=s.remaining_rounds()
+        )
 
-        # --- 1) 마지막 제안자(last_mover) 결정 ---
-        # horizon(남은 라운드 수)의 짝/홀에 따라 first_mover와 last_mover 관계가 달라진다.
-        if remaining % 2 == 1:
-            # 라운드 수가 홀수면 처음 제안자 = 마지막 제안자
-            last_mover = s.first_mover          # "employee" 또는 "employer"
-        else:
-            # 라운드 수가 짝수면 서로 반대
-            last_mover = "employer" if s.first_mover == "employee" else "employee"
+        path = game.compute_equilibrium_path(last_mover="employee")
+
+        current_index = -(s.remaining_rounds() - 1)
+
+        candidate = next(
+            stt for stt in path
+            if stt.round_index == current_index and stt.proposer == "employee"
+        )
+
+        offer = s.B + s.pi * candidate.W_e
+        return max(s.B, min(offer, s.E_max))
+
 
         # --- 2) 루빈스타인 게임 객체 생성 ---
         game = SalaryBargainingGame(
