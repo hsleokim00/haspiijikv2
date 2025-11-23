@@ -880,28 +880,60 @@ elif page == "p4":
         with col2:
             run_step = st.form_submit_button("내 추천 제안 계산하기")
 
-    if run_step:
-        try:
-            if not has_employer_offer:
-                employer_offer_val: Optional[float] = None
-            else:
-                employer_offer_val = employer_offer
+if run_step:
+    try:
+        # 회사 오퍼 있는지 여부 확인
+        if not has_employer_offer:
+            employer_offer_val = None
+        else:
+            employer_offer_val = employer_offer
 
-            suggested = neg_model.next_employee_offer(
-                employer_offer=employer_offer_val
-            )
+        # ❗ 이미 라운드가 종료됐다면 계산 차단
+        if neg_model.state.current_round > neg_model.state.total_rounds:
+            st.error("⛔ 모든 라운드가 이미 종료되어 더 이상 협상을 진행할 수 없습니다.")
+            st.stop()
 
-            st.success(
-                f"💡 이번 라운드에서 추천되는 나의 제안 연봉: **{suggested:,.0f} 만원**"
-            )
+        # 이번 라운드 employee 제안 계산
+        suggested = neg_model.next_employee_offer(
+            employer_offer=employer_offer_val
+        )
+
+        # 현재 라운드 상황 출력
+        st.success(
+            f"💡 이번 라운드에서 추천되는 나의 제안 연봉: **{suggested:,.0f} 만원**"
+        )
+
+        st.markdown(
+            f"- 현재 라운드: **{neg_model.state.current_round - 1} / {neg_model.state.total_rounds}**  \n"
+            f"- 남은 라운드 수: **{neg_model.state.remaining_rounds()}**  \n"
+            f"- 회사 오퍼 히스토리: `{neg_model.state.history_employer}`  \n"
+            f"- 나의 제안 히스토리: `{neg_model.state.history_employee}`"
+        )
+
+        # 🔥 모든 라운드 종료 시 최종 결과 출력
+        if neg_model.state.current_round > neg_model.state.total_rounds:
+            st.markdown("---")
+            st.success("🎉 **모든 라운드 종료!**")
+
+            # 최종 연봉: employee 마지막 제안 or S_target 근처 값
+            final_offer = neg_model.state.history_employee[-1]
+
             st.markdown(
-                f"- 현재 라운드: **{neg_model.state.current_round - 1} / {neg_model.state.total_rounds}**  \n"
-                f"- 지금 턴 이후 남은 라운드 수: **{neg_model.state.remaining_rounds()}**  \n"
-                f"- 최근 회사 오퍼 히스토리: `{neg_model.state.history_employer}`  \n"
-                f"- 나의 과거 제안 히스토리: `{neg_model.state.history_employee}`"
+                f"""
+                ### 🏁 최종 연봉 협상 결과  
+                - **최종 합의 예상 연봉:**  
+                  💰 **{final_offer:,.0f} 만원**  
+                - **총 라운드:** {neg_model.state.total_rounds}회  
+                - 협상이 종료되었습니다.
+                """
             )
-        except Exception as e:
-            st.error(f"제안 계산 중 오류가 발생했습니다: {e}")
+
+            # 입력폼/버튼 비활성화 위해 stop()
+            st.stop()
+
+    except Exception as e:
+        st.error(f"제안 계산 중 오류가 발생했습니다: {e}")
+
 
     # 6) 세션 리셋 버튼 (협상 상태만 리셋)
     if st.button("🔄 협상 세션 리셋", key="reset_neg_model"):
