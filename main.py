@@ -1068,41 +1068,37 @@ elif page == "p4":
         st.stop()
 
     # 4) 현재 상태 요약 보여주기 (🔴 가독성 개선)
+       # 4) 현재 상태 요약 보여주기 (가독성 개선 – HTML 카드 제거)
     st.markdown("#### 현재 협상 상태")
 
     s = neg_model.state
-    current_player_label = "구직자" if neg_model.current_player() == "employee" else "회사"
+    current_player_label = (
+        "구직자" if neg_model.current_player() == "employee" else "회사"
+    )
 
     st.markdown(
         f"""
-        <div style="
-            border:1px solid #ddd;
-            border-radius:12px;
-            padding:12px 16px;
-            background-color:#fafafa;
-            font-size:0.95rem;
-            line-height:1.5;
-        ">
-            <div><strong>라운드</strong>: {s.current_round} / {s.total_rounds}</div>
-            <div><strong>현재 제안 차례</strong>: {current_player_label}</div>
-            <div><strong>목표 연봉 S</strong>: {s.S_target:,.0f} 만원</div>
-            <div><strong>최소 수용 연봉 B</strong>: {s.B:,.0f} 만원</div>
-            <div><strong>직종별 최대 연봉 E_max</strong>: {s.E_max:,.0f} 만원</div>
-            <div><strong>할인율 δ_E(구직자)</strong>: {s.delta_E:.3f}</div>
-            <div><strong>할인율 δ_R(회사)</strong>: {s.delta_R:.3f}</div>
-            <div><strong>회사 관점 추정 δ_Ê</strong>: {s.delta_E_hat:.3f}</div>
-            <div style="margin-top:6px;">
-                <span style="font-weight:bold;">구직자 제안 히스토리</span>: {s.history_employee}
-            </div>
-            <div>
-                <span style="font-weight:bold;">회사 오퍼 히스토리</span>: {s.history_employer}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+**📌 기본 설정**
 
-    st.markdown("---")
+- **라운드**: {s.current_round} / {s.total_rounds}  
+- **현재 제안 차례**: {current_player_label}  
+- **목표 연봉 S**: {s.S_target:,.0f} 만원  
+- **최소 수용 연봉 B**: {s.B:,.0f} 만원  
+- **직종별 최대 연봉 E_max**: {s.E_max:,.0f} 만원  
+
+**📌 할인율**
+
+- **δ_E (구직자)**: {s.delta_E:.3f}  
+- **δ_R (회사)**: {s.delta_R:.3f}  
+- **회사 관점 추정 δ_Ê**: {s.delta_E_hat:.3f}  
+
+**📌 히스토리**
+
+- **구직자 제안 히스토리**: `{s.history_employee}`  
+- **회사 오퍼 히스토리**: `{s.history_employer}`  
+        """,
+        unsafe_allow_html=False,
+    )
 
     # 5) 이번 라운드 회사 오퍼 입력 + 추천 제안 계산
     st.markdown("#### 이번 라운드 입력")
