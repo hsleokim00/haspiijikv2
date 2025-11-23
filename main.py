@@ -73,6 +73,7 @@ class NegotiationState:
             raise ValueError("E_max must be greater than B")
         return (self.S_target - self.B) / self.pi
 
+
 class NegotiationModel:
     """
     실시간 연봉 협상 모델.
@@ -169,38 +170,51 @@ class NegotiationModel:
     # 3) employee 턴일 때, 지금 얼마를 제안할지 계산
     def _suggest_employee_offer(self) -> float:
         """
-        구직자의 현재 라운드 제안값을 계산.
-        - S_target, B, E_max, delta_E, 남은 라운드 수,
-          마지막 고용주 오퍼 등을 이용해
-        - '타겟 S를 향해 얼마나 다가갈지(step)를 결정하는' 휴리스틱 모델
+        루빈스타인 게임의 균형 경로를 이용해서
+        '지금 라운드에서 직원이 제시해야 할 연봉'을 계산한다.
         """
         s = self.state
-
         remaining = s.remaining_rounds()
+
+        # 남은 라운드 없으면 fallback
         if remaining <= 0:
-            return s.S_target
+            return max(s.B, min(s.S_target, s.E_max))
 
-        # 마지막 고용주 오퍼 (없으면 B 기준)
-        last_emp_offer = s.history_employer[-1] if s.history_employer else s.B
+        # --- 1) 마지막 제안자(last_mover) 결정 ---
+        # horizon(남은 라운드 수)의 짝/홀에 따라 first_mover와 last_mover 관계가 달라진다.
+        if remaining % 2 == 1:
+            # 라운드 수가 홀수면 처음 제안자 = 마지막 제안자
+            last_mover = s.first_mover          # "employee" 또는 "employer"
+        else:
+            # 라운드 수가 짝수면 서로 반대
+            last_mover = "employer" if s.first_mover == "employee" else "employee"
 
-        # 타겟까지 남은 거리
-        gap_to_target = s.S_target - last_emp_offer
+        # --- 2) 루빈스타인 게임 객체 생성 ---
+        game = SalaryBargainingGame(
+            B=s.B,
+            S=s.S_target,
+            E=s.E_max,
+            delta_e=s.delta_E,
+            delta_r=s.delta_R,
+            first_mover=s.first_mover,
+            horizon=remaining,
+        )
 
-        # 구직자 인내심: delta_E가 낮을수록 급함
-        urgency = 1.0 - s.delta_E
+        # --- 3) 균형 경로 계산 ---
+        path = game.compute_equilibrium_path(last_mover=last_mover)
 
-        # 남은 라운드가 적을수록 더 크게 움직이도록
-        round_factor = 1.0 / remaining
+        # --- 4) employee가 제안하는 라운드 하나 선택 ---
+        try:
+            candidate = next(stt for stt in path if stt.proposer == "employee")
+        except StopIteration:
+            # 이론상 거의 없지만, 방어적으로 S_target 근처로
+            return max(s.B, min(s.S_target, s.E_max))
 
-        # 이번에 gap의 몇 %를 움직일지 결정 (최소 10%, 최대 90%)
-        step_ratio = 0.5 * urgency + 0.5 * round_factor
-        step_ratio = max(0.1, min(step_ratio, 0.9))
+        # --- 5) W_e 비율 → 실제 연봉 변환 ---
+        raw_offer = s.B + s.pi * candidate.W_e
 
-        offer = last_emp_offer + step_ratio * gap_to_target
-
-        # B~E_max 사이로 클램프
-        offer = max(s.B, min(offer, s.E_max))
-
+        # --- 6) [B, E_max] 범위 클램프 ---
+        offer = max(s.B, min(raw_offer, s.E_max))
         return offer
 
     # 4) 한 턴 진행: (필요하면 employer 오퍼 먼저 넣고) 내 제안 계산
@@ -223,7 +237,7 @@ class NegotiationModel:
             s.current_round += 1
 
         if s.current_round > s.total_rounds:
-            return s.S_target
+            return max(s.B, min(s.S_target, s.E_max))
 
         # 3) employee 제안 계산
         offer = self._suggest_employee_offer()
@@ -246,6 +260,7 @@ class NegotiationModel:
             f"history_employee={s.history_employee}, "
             f"history_employer={s.history_employer}"
         )
+
 
 # ===================== 세션 상태 초기화 =====================
 if "page" not in st.session_state:
@@ -320,9 +335,11 @@ def fetch_corp_metrics(name: str) -> dict:
         "error": data.get("error"),
     }
 
+
 def get_industry_growth(industry: str) -> float:
     """산업별 성장률 가져오기. 없는 경우 3% 기본값."""
     return INDUSTRY_GROWTH.get(industry, 0.03)
+
 
 def company_factor(metrics: dict, industry_growth_fallback: float) -> float:
     """
@@ -346,11 +363,13 @@ def company_factor(metrics: dict, industry_growth_fallback: float) -> float:
 
     return growth_component * size_component
 
+
 def format_score(x: float) -> str:
     """점수 포맷: 소수 둘째 자리까지."""
     if not math.isfinite(x):
         return "-"
     return f"{x:.2f}"
+
 
 def compute_job_change(
     years: float,
@@ -435,16 +454,19 @@ def compute_job_change(
         "factor_next": factor_next,
     }
 
+
 def format_currency(x: float) -> str:
     """연봉 숫자 포맷 (원 단위, 천 단위 콤마)."""
     if not math.isfinite(x):
         return "-"
     return f"{int(round(x)):,} 원"
 
+
 def format_percent(x: float) -> str:
     if not math.isfinite(x):
         return "-"
     return f"{x * 100:.1f}%"
+
 
 # ===================== 공통 헤더 =====================
 st.title("피이직대학 이직 상담소")
@@ -820,6 +842,7 @@ elif page == "p4":
 # ===================== (아래 클래스들은 건드리지 않고 그대로 둠) =====================
 Actor = Literal["employee", "employer"]
 
+
 @dataclass
 class RoundState:
     """한 라운드의 균형 상태"""
@@ -831,6 +854,7 @@ class RoundState:
     @property
     def is_employee_turn(self) -> bool:
         return self.proposer == "employee"
+
 
 @dataclass
 class SalaryBargainingGame:
