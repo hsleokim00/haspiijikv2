@@ -539,7 +539,7 @@ if st.session_state.get("show_info", False):
     with st.expander("이 프로그램의 계산 로직", expanded=True):
         st.markdown(
             """
-**1. 이직 여부 결정(Wp, Wk) 계산 로직**
+**1. 이직 여부 결정(Wp, Wk) 계산 개요**
 
 - 본 도구는 현재 회사와 이직 고려 회사를 비교하기 위하여 두 회사에 대한 **워크플레이스 지수(Wp, Wk)**를 산출한다.  
 - 입력 변수는 **연차(년)**, **현재 연봉(원)**, **현재 회사명**, **이직 고려 회사명**, **현재 직종**, **이직 고려 직종**이다.  
@@ -552,16 +552,16 @@ if st.session_state.get("show_info", False):
 - 연봉을 1억 원 기준으로 스케일링한 뒤, 연차만큼 업종 성장률을 반영하여 다음과 같이 정의한다.  
 
 \\[
-\\text{SpBase}_{\\text{now}} = \\frac{\\text{Salary}}{100,000,000} \\times (1 + g_{\\text{now}})^{\\text{years}}
+\\text{SpBase}_{\\text{now}} = \\frac{\\text{Salary}}{100{,}000{,}000} (1 + g_{\\text{now}})^{\\text{years}}
 \\]
 
 \\[
-\\text{SpBase}_{\\text{next}} = \\frac{\\text{Salary}}{100,000,000} \\times (1 + g_{\\text{next}})^{\\text{years}}
+\\text{SpBase}_{\\text{next}} = \\frac{\\text{Salary}}{100{,}000{,}000} (1 + g_{\\text{next}})^{\\text{years}}
 \\]
 
 3) 회사 계수(Company Factor)  
 - DART API를 통하여 각 회사의 **자산(assets)**, **매출 성장률(salesGrowth)** 등의 지표를 가져온다.  
-- 매출 성장률이 존재하면 이를, 존재하지 않으면 해당 업종 평균 성장률을 사용하여 성장률 컴포넌트를 정의한다.  
+- 매출 성장률이 존재하면 이를, 존재하지 않으면 해당 업종 평균 성장률을 사용한다.  
 
 \\[
 \\text{growth component} = 1 + \\text{salesGrowth}
@@ -595,31 +595,33 @@ Wk = \\text{SpBase}_{\\text{next}} \\times \\text{Company Factor}_{\\text{next}}
   - \\( Wk > Wp \\)이면 **“이직!”**  
   - \\( Wp > Wk \\)이면 **“잔류!”**  
   - 두 값이 거의 비슷하면 **“보류”**로 판정한다.  
-- DART 데이터가 부분적으로만 존재하는 경우에도, 가능한 값만을 사용하여 계산을 수행한 뒤, 데이터 신뢰도에 대한 안내 메시지를 표기한다.  
+
 
 ---
 
-**2. 연봉 협상 시뮬레이터 로직**
+**2. 연봉 협상 시뮬레이터 계산 개요**
 
-- 연봉 협상 모듈은 루빈스타인(Rubinstein) 교섭 모형을 기반으로 한다.  
-- 협상에 참여하는 두 행위자는 **구직자(employee)**와 **회사(employer)**이며,  
-  협상의 기본 구간은 \\([B, E_{\\max}]\\)이다.  
+- 연봉 협상 모듈은 루빈스타인(Rubinstein) 교섭 모형을 참고하여 구성하였다.  
+- 두 행위자는 **구직자(employee)**와 **회사(employer)**이며, 협상 가능한 연봉 구간은 \\([B, E_{\\max}]\\)이다.  
 
 1) 기본 파라미터  
 - \\( S \\): 구직자가 목표로 하는 최종 연봉(희망 연봉)  
 - \\( B \\): 구직자가 받아들일 수 있는 최소 연봉  
 - \\( E_{\\max} \\): 해당 직종에서 고용주가 지불할 수 있는 최대 연봉  
-- 협상의 전체 파이는 \\( \\pi = E_{\\max} - B \\)로 정의한다.  
+- 협상의 전체 파이는 다음과 같이 정의한다.  
+
+\\[
+\\pi = E_{\\max} - B
+\\]
 
 2) 목표 몫 비율 x  
-- 구직자가 최종 시점에 가져가고자 하는 파이의 비율을  
+- 구직자가 최종 시점에 가져가고자 하는 파이의 비율은  
 
 \\[
 x = \\frac{S - B}{\\pi}
 \\]
 
-로 두고, \\( 0 \\le x \\le 1 \\) 범위 내에 있는지 검증한다.  
-- 이 값이 0 미만 또는 1 초과이면, 목표 연봉이 협상 가능한 범위를 벗어난 것으로 판단한다.  
+로 두며, \\( 0 \\le x \\le 1 \\) 범위 내에 있는지 검증한다.  
 
 3) 할인율(δ) 설정  
 - 협상에는 구직자 할인율 \\( \\delta_E \\), 회사 할인율 \\( \\delta_R \\),  
@@ -631,45 +633,44 @@ x = \\frac{S - B}{\\pi}
 - **회사 선제(employer first)**인 경우  
   - 위의 \\( x = (S-B)/\\pi \\) 값을 이용하여,  
     - \\( x \\)가 클수록(구직자가 더 큰 몫을 원할수록) 구직자 할인율을 다소 낮게,  
-    - 회사 할인율을 다소 높게 설정하는 방식으로 자동 계산한다.  
+    - 회사 할인율을 다소 높게 설정하도록 자동 계산한다.  
 
-4) 라운드별 균형 경로 계산  
-- SalaryBargainingGame 클래스에서는 일정한 시점 \\( t \\)에서의 구직자 몫 \\( W_E(t) = x \\)를 기준으로 두고,  
+4) 라운드별 균형 경로 계산(요약)  
+- SalaryBargainingGame 클래스는 최종 시점 \\( t \\)에서의 구직자 몫 \\( W_E(t) = x \\)를 기준점으로 두고,  
   t, t-1, t-2 … 방향으로 **역진행(backward induction)**을 수행한다.  
-- 각 라운드에서 제안하는 쪽에 따라 다음 관계식을 번갈아 적용한다.  
+- 각 단계에서 제안자에 따라 다음 관계식을 번갈아 적용한다.  
 
 - 구직자 제안 라운드:  
 
 \\[
-W_R(t-1) = 1 - \\delta_E \\cdot W_E(t), \\quad
+W_R(t-1) = 1 - \\delta_E W_E(t), \\quad
 W_E(t-1) = 1 - W_R(t-1)
 \\]
 
 - 회사 제안 라운드:  
 
 \\[
-W_E(t-1) = 1 - \\delta_R \\cdot W_R(t), \\quad
+W_E(t-1) = 1 - \\delta_R W_R(t), \\quad
 W_R(t-1) = 1 - W_E(t-1)
 \\]
 
-- 이 과정을 통해 각 라운드의 \\( W_E, W_R \\) 값을 계산하고,  
-  구직자 몫이 확정되면 실제 연봉 제안은  
+- 이렇게 얻은 \\( W_E \\) 값에 대하여 실제 제안 연봉은  
 
 \\[
-\\text{Offer} = B + \\pi \\times W_E
+\\text{Offer} = B + \\pi W_E
 \\]
 
 로 환산한다.  
 
-5) 현실 보정 및 히스토리 반영  
-- 첫 구직자 제안의 경우, 이론값을 기준으로 하되 목표 연봉 \\( S \\)보다 약간 높은 범위(예: +3% ~ +15%)에서 시작하도록 앵커링하여 현실적인 협상 패턴이 나타나도록 한다.  
-- 이후 라운드에서는 이전 제안 대비 일정 비율(예: 1%) 이상 양보하도록 제한하여,  
-  협상 과정에서 구직자 제안이 점진적으로 조정되도록 한다.  
-- 회사가 제시한 연봉 오퍼는 히스토리에 저장되며, 오퍼가 목표 연봉에 얼마나 가까운지에 따라  
-  회사 할인율 및 회사가 추정하는 구직자 할인율을 점진적으로 업데이트한다.  
+5) 현실 보정  
+- 첫 구직자 제안 시에는 이론값을 그대로 사용하지 않고,  
+  목표 연봉 \\( S \\)보다 약간 높은 구간(예: +3% ~ +15%)에서 시작하도록 조정하여  
+  실제 협상과 유사한 앵커링 효과를 반영한다.  
+- 이후 라운드에서는 직전 제안 대비 최소 일정 비율(예: 1%) 이상 양보하도록 제한하여,  
+  제안 금액이 단절적으로 움직이지 않도록 한다.  
 
-이와 같은 방식으로, 프로그램은 이직 여부를 정량적으로 평가하고,  
-설정된 조건과 할인율을 바탕으로 라운드별 연봉 협상 과정을 시뮬레이션하도록 설계되어 있다.
+요약하면, 본 프로그램은 (1) 회사 및 업종 정보를 바탕으로 이직 여부를 정량적으로 비교하고,  
+(2) 설정된 조건과 할인율에 따라 라운드별 연봉 협상 경로를 시뮬레이션하도록 설계되어 있다.
             """
         )
 
@@ -736,7 +737,7 @@ if page == "p2":
                 mapped_field = INDUSTRY_TO_FIELD.get(target_ind)
                 if mapped_field:
                     st.session_state["neg_field_from_wk"] = mapped_field
-           
+
             except Exception as e:
                 st.error(f"오류가 발생했습니다: {e}")
 
@@ -799,28 +800,28 @@ if page == "p2":
         if (not result.get("now_ok", True)) or (not result.get("next_ok", True)):
             st.info(
                 "⚠ 일부 회사 데이터가 DART에서 완전하게 조회되지 않아, "
-                "업종 평균/기본값으로 보정된 추정치로 계산했습니다."
+                "업종 평균/기본값으로 보정된 추정치로 계산했다."
             )
 
         if decision == "잔류!":
             st.warning(
-                "현재 회사의 Wp가 이직 회사의 Wk보다 높게 계산되었습니다.\n\n"
+                "현재 회사의 Wp가 이직 회사의 Wk보다 높게 계산되었다.\n\n"
                 "⚠️ 충분히 양호한 직장을 보유하고 있는 상황에서 이직을 결정하는 경우, "
-                "비금전적 요소를 보다 면밀히 검토할 필요가 있습니다."
+                "비금전적 요소를 보다 면밀히 검토할 필요가 있다."
             )
         elif decision == "보류":
-            st.info("두 회사의 지수가 유사하게 계산되었습니다. 워라밸, 조직문화 등 비금전적 요소를 추가로 고려하는 것이 바람직합니다.")
+            st.info("두 회사의 지수가 유사하게 계산되었다. 워라밸, 조직문화 등 비금전적 요소를 추가로 고려하는 것이 바람직하다.")
         elif decision == "계산 불가":
-            st.error("지수를 계산할 수 없습니다. 입력값과 회사 데이터(연봉, 연차 등)를 다시 확인해 주세요.")
+            st.error("지수를 계산할 수 없다. 입력값과 회사 데이터(연봉, 연차 등)를 다시 확인할 필요가 있다.")
 
         if decision == "이직!":
-            st.success("이직 회사의 Wk가 현재 회사의 Wp보다 높게 계산되었습니다.")
+            st.success("이직 회사의 Wk가 현재 회사의 Wp보다 높게 계산되었다.")
             move = st.button("이직! (연봉 협상 메뉴로 이동)")
             if move:
                 st.session_state["page"] = "p3"
                 st.rerun()
         else:
-            st.info("이직! 결과가 나와야 연봉협상 메뉴로 이동할 수 있습니다.")
+            st.info("이직! 결과가 나와야 연봉협상 메뉴로 이동할 수 있다.")
     with st.expander("계산 상세 보기 (SpBase, 회사 계수, DART 데이터 상태 등)"):
         if result:
             st.write(f"연차: `{years}` 년")
@@ -860,12 +861,12 @@ if page == "p2":
                 """
             )
         else:
-            st.write("아직 계산된 결과가 없습니다.")
+            st.write("아직 계산된 결과가 없다.")
 
     # 🔴 1번 요구사항: 초기 화면에서 바로 연봉 협상 창으로 가는 버튼
     st.markdown("---")
-    st.markdown("#### 이미 이직을 결정하셨다면?")
-    st.caption("이직 여부는 이미 스스로 결정했고, **연봉 협상 연습만** 진행하고자 하는 경우 아래 버튼을 사용할 수 있습니다.")
+    st.markdown("#### 이미 이직을 결정한 경우")
+    st.caption("이직 여부는 이미 스스로 결정했고, **연봉 협상 연습만** 진행하고자 하는 경우 아래 버튼을 사용할 수 있다.")
     if st.button("연봉 협상 시뮬레이터로 바로 이동", key="go_p4_from_p2"):
         st.session_state["page"] = "p4"
         st.rerun()
@@ -881,7 +882,7 @@ elif page == "p3":
     st.markdown(
         """<div style="padding:16px;border-radius:16px;border:1px solid #ddd;">
         <h3>협상 시뮬레이터</h3>
-        <p>회사 제안 → 나의 응답을 라운드별로 반복하여 연봉 협상 과정을 연습할 수 있습니다.</p>
+        <p>회사 제안 → 나의 응답을 라운드별로 반복하여 연봉 협상 과정을 연습할 수 있다.</p>
         </div>""",
         unsafe_allow_html=True,
     )
@@ -903,7 +904,7 @@ elif page == "p4":
     st.caption(
         "루빈스타인 모형에서 출발한 할인율(δ) 개념과 "
         "목표 연봉 S, 최소 수용 연봉 B, 직종별 최대 연봉 E_max를 바탕으로 "
-        "라운드별 적정 제안 연봉을 계산하는 시뮬레이터입니다."
+        "라운드별 적정 제안 연봉을 계산하는 시뮬레이터이다."
     )
 
     # 0) 처음 들어왔을 때: 첫 제안자만 고르는 드롭다운만 보이게
@@ -922,7 +923,7 @@ elif page == "p4":
                 st.session_state["neg_first_mover"] = "employer"
                 st.session_state["neg_total_rounds"] = 4  # 고용자 선제 시 4라운드
             st.success(
-                f"첫 제안자: **{first_choice}**로 설정되었습니다. "
+                f"첫 제안자: **{first_choice}**로 설정되었다. "
                 f"(전체 라운드 수: {st.session_state['neg_total_rounds']})"
             )
             st.rerun()
@@ -949,8 +950,6 @@ elif page == "p4":
     neg_model: Optional[NegotiationModel] = st.session_state.get("neg_model")
 
     # 2) 협상 기본 설정 폼
-    #    👉 first_mover가 employee면 기존처럼 할인율 슬라이더 노출
-    #       first_mover가 employer면 할인율은 x = (S-B)/π 기반으로 자동 계산하고 UI에서는 숨김
     with st.expander("🔧 협상 기본 설정", expanded=(neg_model is None)):
         with st.form("neg_init_form"):
             col1, col2 = st.columns(2)
@@ -993,35 +992,8 @@ elif page == "p4":
                 # 내부 연산에서 사용할 키는 field_keys의 index로 역변환
                 field_name = field_keys[field_labels.index(selected_label)]
 
-                # 나머지 할인율 UI는 기존 코드 그대로 유지
                 if first_mover == "employee":
-                    delta_E_default = st.slider(
-                        "초기 구직자 할인율 δ_E",
-                        min_value=0.50,
-                        max_value=0.99,
-                        value=0.95,
-                        step=0.01,
-                    )
-                    
-                    delta_R_default = st.slider(
-                        "초기 회사 할인율 δ_R",
-                        min_value=0.50,
-                        max_value=0.99,
-                        value=0.95,
-                        step=0.01,
-                    )
-                else:
-                    st.markdown(
-                        "δ_E, δ_R(구직자/회사 할인율)은  \n"
-                        "**S, B, E_max와 x = (S−B)/π** 관계식을 이용해 "
-                        "모형이 자동으로 계산합니다."
-                    )
-                    delta_E_default = None
-                    delta_R_default = None
-
-
-                if first_mover == "employee":
-                    # ✅ 구직자 선제일 때: 기존 UI 그대로 (슬라이더 노출)
+                    # ✅ 구직자 선제일 때: 슬라이더로 직접 설정
                     delta_E_default = st.slider(
                         "초기 구직자 할인율 δ_E",
                         min_value=0.50,
@@ -1041,7 +1013,7 @@ elif page == "p4":
                     st.markdown(
                         "δ_E, δ_R(구직자/회사 할인율)은  \n"
                         "**S, B, E_max와 x = (S−B)/π** 관계식을 이용하여 "
-                        "모형이 자동으로 계산합니다."
+                        "모형이 자동으로 계산한다."
                     )
                     # 폼 내부에서는 일단 None으로 두고, 아래 submitted 블록에서 실제 값 계산
                     delta_E_default = None
@@ -1082,17 +1054,17 @@ elif page == "p4":
                 st.session_state["neg_model"] = model
                 neg_model = model
                 st.success(
-                    "✅ 새 협상 세션이 초기화되었습니다.\n\n"
+                    "✅ 새 협상 세션이 초기화되었다.\n\n"
                     f"- 첫 제안자: **{human_label}**  \n"
                     f"- δ_E(구직자 할인율): **{model.state.delta_E:.3f}**  \n"
                     f"- δ_R(회사 할인율): **{model.state.delta_R:.3f}**"
                 )
             except Exception as e:
-                st.error(f"협상 모델 초기화 중 오류가 발생했습니다: {e}")
+                st.error(f"협상 모델 초기화 중 오류가 발생했다: {e}")
 
     # 3) 모델이 아직 없으면 안내 후 종료
     if neg_model is None:
-        st.info("위에서 협상 기본 설정을 마친 뒤, 새 협상 세션을 시작해 주세요.")
+        st.info("위에서 협상 기본 설정을 마친 뒤, 새 협상 세션을 시작할 필요가 있다.")
         st.stop()
 
     # 4) 현재 상태 요약 보여주기 (🔴 가독성 개선)
@@ -1144,7 +1116,7 @@ elif page == "p4":
                 value=6500.0,
                 step=100.0,
                 format="%.0f",
-                help="회사 오퍼가 없다면 체크박스를 해제하고, 바로 나의 제안을 계산할 수 있습니다.",
+                help="회사 오퍼가 없다면 체크박스를 해제하고, 바로 나의 제안을 계산할 수 있다.",
             )
             has_employer_offer = st.checkbox(
                 "이번 라운드에 회사 오퍼가 있었다",
@@ -1163,7 +1135,7 @@ elif page == "p4":
 
             # ❗ 이미 라운드가 종료됐다면 계산 차단
             if neg_model.state.current_round > neg_model.state.total_rounds:
-                st.error("⛔ 모든 라운드가 이미 종료되어 더 이상 협상을 진행할 수 없습니다.")
+                st.error("⛔ 모든 라운드가 이미 종료되어 더 이상 협상을 진행할 수 없다.")
                 st.stop()
 
             # 이번 라운드 employee 제안 계산
@@ -1185,7 +1157,7 @@ elif page == "p4":
             # 🔥 모든 라운드 종료 시 최종 결과 출력
             if neg_model.state.current_round > neg_model.state.total_rounds:
                 st.markdown("---")
-                st.success("🎉 **모든 라운드가 종료되었습니다.**")
+                st.success("🎉 **모든 라운드가 종료되었다.**")
 
                 # 최종 연봉: employee 마지막 제안 or S_target 근처 값
                 final_offer = neg_model.state.history_employee[-1]
@@ -1196,13 +1168,13 @@ elif page == "p4":
                     - **최종 합의 예상 연봉:**  
                       💰 **{final_offer:,.0f} 만원**  
                     - **총 라운드:** {neg_model.state.total_rounds}회  
-                    - 협상이 종료되었습니다.
+                    - 협상이 종료되었다.
                     """
                 )
                 # 입력폼/버튼 비활성화 위해 stop()
                 st.stop()
         except Exception as e:
-            st.error(f"제안 계산 중 오류가 발생했습니다: {e}")
+            st.error(f"제안 계산 중 오류가 발생했다: {e}")
 
     # 🔽 라운드별 할인율 변화 타임라인 출력 (🔴 가독성 개선)
     if hasattr(neg_model, "delta_history") and len(neg_model.delta_history) > 0:
@@ -1299,9 +1271,9 @@ class SalaryBargainingGame:
 
     def __post_init__(self) -> None:
         if not (self.B < self.S <= self.E):
-            raise ValueError("B < S ≤ E 관계가 성립해야 합니다.")
+            raise ValueError("B < S ≤ E 관계가 성립해야 한다.")
         if not (0 < self.delta_e <= 1 and 0 < self.delta_r <= 1):
-            raise ValueError("할인율(delta_e, delta_r)은 0과 1 사이여야 합니다.")
+            raise ValueError("할인율(delta_e, delta_r)은 0과 1 사이여야 한다.")
 
     @property
     def pie(self) -> float:
@@ -1322,9 +1294,9 @@ class SalaryBargainingGame:
         - x = (S - B) / π 를 t 시점 구직자 몫 W_E(t)로 두고
         - t, t-1, t-2 ... 로 역진행하면서
           고용주/구직자 라운드마다
-          W_R = 1 - δ_E * W_E_next  또는
-          W_E = 1 - δ_R * W_R_next
-          를 번갈아 적용합니다.
+          W_R = 1 - δ_E W_E(t)  또는
+          W_E = 1 - δ_R W_R(t)
+          를 번갈아 적용한다.
         """
         # 최종 시점 t에서의 구직자 몫 (x), 고용주 몫
         W_e_next = self.x_target          # x = (S - B) / π
@@ -1340,14 +1312,14 @@ class SalaryBargainingGame:
         for step in range(1, self.horizon + 1):
             if proposer == "employee":
                 # 바로 이전 라운드는 고용주 제안 라운드
-                # W_R(t-1) = 1 - δ_E * W_E(t)
+                # W_R(t-1) = 1 - δ_E W_E(t)
                 W_r = 1.0 - self.delta_e * W_e_next
                 # W_E(t-1) = 1 - W_R(t-1)
                 W_e = 1.0 - W_r
                 proposer_prev: Actor = "employer"
             else:
                 # proposer == "employer" → 이전 라운드는 구직자 제안 라운드
-                # W_E(t-1) = 1 - δ_R * W_R(t)
+                # W_E(t-1) = 1 - δ_R W_R(t)
                 W_e = 1.0 - self.delta_r * W_r_next
                 # W_R(t-1) = 1 - W_E(t-1)
                 W_r = 1.0 - W_e
@@ -1375,7 +1347,7 @@ class SalaryBargainingGame:
         current_proposer: Actor,
     ) -> float:
         """
-        current_round_index 기준으로, 지금 또는 다음 employee 차례의 추천 연봉을 계산합니다.
+        current_round_index 기준으로, 지금 또는 다음 employee 차례의 추천 연봉을 계산한다.
         """
         path = self.compute_equilibrium_path(last_mover="employee")
 
@@ -1410,5 +1382,5 @@ class SalaryBargainingGame:
         )
 
     def update_deltas_from_history(self) -> None:
-        """TODO: 히스토리를 기반으로 delta_e, delta_r 업데이트 로직입니다."""
+        """TODO: 히스토리를 기반으로 delta_e, delta_r 업데이트 로직이다."""
         pass
