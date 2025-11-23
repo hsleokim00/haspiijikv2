@@ -11,6 +11,73 @@ st.set_page_config(
     layout="centered",
 )
 
+# ✅ PC + 모바일 반응형 CSS
+st.markdown("""
+<style>
+/* 공통: 중앙 폭 & 기본 여백 */
+.main .block-container {
+    max-width: 1000px;
+    padding-top: 2rem;
+    padding-bottom: 4rem;
+}
+
+/* 버튼 공통 스타일(PC/모바일 둘 다) */
+.stButton > button {
+    border-radius: 999px;
+    padding: 0.5rem 1.5rem;
+    font-weight: 600;
+}
+
+/* ====== 모바일 전용 스타일 ====== */
+@media (max-width: 768px) {
+
+    /* 본문 전체 좌우 여백 줄이기 */
+    .main .block-container {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+
+    /* 제목 폰트 크기 조정 */
+    h1, h2, h3 {
+        line-height: 1.3;
+    }
+    h1 {
+        font-size: 1.4rem !important;
+    }
+    h2 {
+        font-size: 1.2rem !important;
+    }
+    h3 {
+        font-size: 1.05rem !important;
+    }
+
+    /* 본문 글자 조금만 작게 / 촘촘하게 */
+    p, li {
+        font-size: 0.95rem;
+    }
+
+    /* 버튼은 모바일에서 가로 꽉 채우기 */
+    .stButton > button {
+        width: 100%;
+        padding: 0.75rem 1rem;
+        font-size: 1rem;
+    }
+
+    /* 컬럼(열) 구조: 모바일에서는 한 줄씩 쌓이게 */
+    [data-testid="column"] {
+        width: 100% !important;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    /* 라디오/셀렉트박스 등 컨트롤 간격 살짝 조정 */
+    .stRadio, .stSelectbox, .stTextInput, .stNumberInput, .stSlider {
+        margin-bottom: 0.5rem;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
 API_BASE = "https://black-bread-33be.dlspike520.workers.dev/"
 
 # 산업별 평균 연봉 상승률 (HTML과 동일)
