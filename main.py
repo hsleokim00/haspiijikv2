@@ -701,10 +701,55 @@ elif page == "p4":
         "라운드별로 '지금 얼마를 제안하면 좋을지'를 계산해 주는 시뮬레이터입니다."
     )
 
+    # 0) 처음 들어왔을 때: 첫 제안자만 고르는 드롭다운만 보이게
+    if "neg_first_mover" not in st.session_state or "neg_total_rounds" not in st.session_state:
+        st.markdown("#### 🧩 누가 먼저 제안하나요?")
+
+        first_choice = st.selectbox(
+            "첫 제안자 선택",
+            options=["구직자가 먼저 제안 (employee)", "회사가 먼저 제안 (employer)"],
+            index=0,
+        )
+
+        if st.button("확인", key="first_mover_confirm"):
+            if "구직자" in first_choice:
+                st.session_state["neg_first_mover"] = "employee"
+                st.session_state["neg_total_rounds"] = 3  # 구직자 선제 시 3라운드
+            else:
+                st.session_state["neg_first_mover"] = "employer"
+                st.session_state["neg_total_rounds"] = 4  # 고용자 선제 시 4라운드
+
+            st.success(
+                f"첫 제안자: **{first_choice}** 로 설정되었습니다. "
+                f"(전체 라운드 수: {st.session_state['neg_total_rounds']})"
+            )
+            st.rerun()
+
+        # 🔻 이 단계에서는 진짜로 '드롭다운만' 보이도록 여기서 종료
+        st.stop()
+
+    # 0-1) 이미 첫 제안자를 선택한 이후에는, 선택 결과만 보여주기
+    first_mover = st.session_state["neg_first_mover"]        # "employee" or "employer"
+    total_rounds_default = st.session_state["neg_total_rounds"]
+
+    human_label = "구직자(employee)" if first_mover == "employee" else "회사(employer)"
+    st.info(
+        f"현재 설정된 첫 제안자: **{human_label}**  \n"
+        f"전체 라운드 수: **{total_rounds_default}**"
+    )
+
+    # 필요하면 첫 제안자 선택을 다시 할 수 있는 버튼
+    if st.button("첫 제안자 다시 선택하기", key="reset_first_mover"):
+        for k in ["neg_first_mover", "neg_total_rounds", "neg_model"]:
+            st.session_state.pop(k, None)
+        st.rerun()
+
     # 1) 세션에서 모델 꺼내오기
     neg_model: Optional[NegotiationModel] = st.session_state.get("neg_model")
 
-    # 2) 초기 설정 폼 (모델이 아직 없을 때는 열려 있게)
+    # 2) 협상 기본 설정 폼
+    #    👉 이제는 first_mover / total_rounds는 여기서 안 고르고,
+    #       위에서 선택한 것을 그대로 사용합니다.
     with st.expander("🔧 협상 기본 설정", expanded=(neg_model is None)):
         with st.form("neg_init_form"):
             col1, col2 = st.columns(2)
@@ -725,23 +770,11 @@ elif page == "p4":
                     step=100.0,
                     format="%.0f",
                 )
-                total_rounds = st.number_input(
-                    "전체 라운드 수 (왕복 교대 제안 횟수)",
-                    min_value=1,
-                    max_value=10,
-                    value=4,
-                    step=1,
-                )
             with col2:
                 field_name = st.selectbox(
                     "직종 (E_max 테이블 키)",
                     options=list(DEFAULT_E_BY_FIELD.keys()),
                     index=0,
-                )
-                first_mover = st.selectbox(
-                    "첫 제안자",
-                    options=["employee", "employer"],
-                    format_func=lambda x: "구직자(employee)" if x == "employee" else "회사(employer)",
                 )
                 delta_E_default = st.slider(
                     "초기 구직자 할인율 δ_E",
@@ -766,8 +799,8 @@ elif page == "p4":
                     S=S_target,
                     B=B,
                     field_name=field_name,
-                    first_mover=first_mover,
-                    total_rounds=int(total_rounds),
+                    first_mover=first_mover,                  # 🔹 위에서 고른 값 사용
+                    total_rounds=int(total_rounds_default),    # 🔹 위에서 정한 3 또는 4 사용
                     E_table=DEFAULT_E_BY_FIELD,
                     delta_E_default=delta_E_default,
                     delta_R_default=delta_R_default,
@@ -834,8 +867,8 @@ elif page == "p4":
         except Exception as e:
             st.error(f"제안 계산 중 오류가 발생했습니다: {e}")
 
-    # 6) 세션 리셋 버튼
-    if st.button("🔄 협상 세션 리셋"):
+    # 6) 세션 리셋 버튼 (협상 상태만 리셋)
+    if st.button("🔄 협상 세션 리셋", key="reset_neg_model"):
         st.session_state["neg_model"] = None
         st.rerun()
 
