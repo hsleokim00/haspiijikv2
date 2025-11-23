@@ -186,7 +186,7 @@ class NegotiationModel:
                 offer = min_anchor
             elif offer > max_anchor:
                 offer = max_anchor
-               # 7) 최종적으로 [B, E_max] 범위로 한 번 더 클램프
+         # 7) 최종적으로 [B, E_max] 범위로 한 번 더 클램프
         offer = max(s.B, min(offer, s.E_max))
 
         # 8) 항상 일정 비율 이상은 내려가도록 강제
