@@ -3,6 +3,7 @@ import requests
 import streamlit as st
 from dataclasses import dataclass, field
 from typing import Literal, List, Dict, Optional
+import pandas as pd  # >>> E/WI 추가: corp_map_result 불러오기용
 
 # ===================== 기본 설정 =====================
 st.set_page_config(
@@ -89,6 +90,69 @@ INDUSTRY_GROWTH = {
     "IT·통신업": 0.043      # 4.3%
 }
 INDUSTRY_OPTIONS = list(INDUSTRY_GROWTH.keys())
+
+# ===================== WI = S + E 계산용 유틸 (추가) =====================
+# >>> E/WI 추가: corp_map_result 기반 기업가치 지수 E 계산
+
+@dataclass
+class CorpStats:
+    name: str
+    industry: str
+    asset: float
+    revenue: float
+    employees: float
+
+@st.cache_data
+def load_corp_table() -> pd.DataFrame:
+    """
+    corp_map_result.xlsx (또는 동일 구조의 파일)을 불러온다.
+    컬럼 예시: ['corp_name', 'industry', 'asset', 'revenue', 'employees']
+    파일이 없거나 오류가 나면 빈 DataFrame을 반환.
+    """
+    try:
+        return pd.read_excel("corp_map_result.xlsx")
+    except Exception:
+        return pd.DataFrame()
+
+df_corp_table = load_corp_table()
+
+def _safe_div(a: float, b: float) -> float:
+    if not b or not math.isfinite(b):
+        return 0.0
+    return a / b
+
+def get_industry_max_values(industry: str) -> Dict[str, float]:
+    """
+    동일 업종 내에서 자산/매출/직원수 최대값을 구한다.
+    """
+    if df_corp_table.empty:
+        return {"asset": 0.0, "revenue": 0.0, "employees": 0.0}
+
+    sub = df_corp_table[df_corp_table["industry"] == industry]
+    if sub.empty:
+        return {"asset": 0.0, "revenue": 0.0, "employees": 0.0}
+
+    return {
+        "asset": float(sub["asset"].max()),
+        "revenue": float(sub["revenue"].max()),
+        "employees": float(sub["employees"].max()),
+    }
+
+def calc_E(corp: CorpStats) -> float:
+    """
+    E(기업가치 지수) 계산:
+    E = (자산 / 업종별 자산 MAX * 100)
+      + (매출 / 업종별 매출 MAX * 100)
+      + (직원수 / 업종별 직원수 MAX * 100)
+    """
+    max_vals = get_industry_max_values(corp.industry)
+    if all(v == 0 for v in max_vals.values()):
+        return 0.0
+
+    s_asset = _safe_div(corp.asset, max_vals["asset"]) * 100.0
+    s_rev = _safe_div(corp.revenue, max_vals["revenue"]) * 100.0
+    s_emp = _safe_div(corp.employees, max_vals["employees"]) * 100.0
+    return s_asset + s_rev + s_emp
 
 # ===================== NegotiationModel 정의 =====================
 
@@ -889,6 +953,49 @@ if page == "p2":
                 st.rerun()
         else:
             st.info("이직! 결과가 나와야 연봉협상 메뉴로 이동할 수 있다.")
+
+        # ===================== WI = S + E 계산 블록 (추가) =====================
+        st.markdown("#### WI 계산 (S + E)")
+
+        # S: 이직 시 얻는 주관적 가치 → 여기서는 이직 회사 Wk 값을 사용
+        S_value = result["Wk"]
+
+        st.write(f"S (이직 직장 가치, Wk 기반) = `{S_value:.4f}`")
+
+        E_value = None
+        WI_value = None
+
+        if not df_corp_table.empty and "corp_name" in df_corp_table.columns:
+            matched = df_corp_table[df_corp_table["corp_name"] == next_corp]
+            if not matched.empty:
+                row = matched.iloc[0]
+                try:
+                    corp_stats = CorpStats(
+                        name=str(row["corp_name"]),
+                        industry=str(row["industry"]),
+                        asset=float(row["asset"]),
+                        revenue=float(row["revenue"]),
+                        employees=float(row["employees"]),
+                    )
+                    E_value = calc_E(corp_stats)
+                    WI_value = S_value + E_value
+
+                    # 세션에 저장 (추후 다른 페이지에서 활용 가능)
+                    st.session_state["S_value"] = S_value
+                    st.session_state["E_value"] = E_value
+                    st.session_state["WI_value"] = WI_value
+
+                    st.success(
+                        f"WI = S + E = {S_value:.2f} + {E_value:.2f} = **{WI_value:.2f}**"
+                    )
+                except Exception as e:
+                    st.warning(f"E 계산 중 오류가 발생했습니다: {e}")
+            else:
+                st.info("corp_map_result.xlsx에서 이직 기업명을 찾을 수 없어 E를 계산하지 못했습니다.")
+        else:
+            st.info("corp_map_result.xlsx가 없거나 비어 있어 E를 계산하지 못했습니다.")
+        # ===================== WI 블록 끝 =====================
+
     with st.expander("계산 상세 보기 (SpBase, 회사 계수, DART 데이터 상태 등)"):
         if result:
             st.write(f"연차: `{years}` 년")
@@ -1134,8 +1241,7 @@ elif page == "p4":
         st.info("위에서 협상 기본 설정을 마친 뒤, 새 협상 세션을 시작할 필요가 있다.")
         st.stop()
 
-    # 4) 현재 상태 요약 보여주기 (🔴 가독성 개선)
-       # 4) 현재 상태 요약 보여주기 (가독성 개선 – HTML 카드 제거)
+    # 4) 현재 상태 요약 보여주기 (가독성 개선 – HTML 카드 제거)
     st.markdown("#### 현재 협상 상태")
 
     s = neg_model.state
@@ -1239,12 +1345,10 @@ elif page == "p4":
         except Exception as e:
             st.error(f"제안 계산 중 오류가 발생했다: {e}")
 
-       # 🔽 라운드별 할인율 변화 타임라인 출력 (가독성 개선)
-        # 🔽 라운드별 할인율 변화 타임라인 출력 (가독성 개선)
+    # 🔽 라운드별 할인율 변화 타임라인 출력 (가독성 개선)
     if hasattr(neg_model, "delta_history") and len(neg_model.delta_history) > 0:
         st.markdown("### 📘 라운드별 할인율 변화 타임라인")
 
-        # ⚠️ 맨 앞에 공백 없이 바로 <style> 로 시작해야 코드 블록이 아니라 HTML로 렌더링됨
         timeline_html = """
 <style>
 .timeline {
@@ -1300,7 +1404,6 @@ elif page == "p4":
         timeline_html += "</div>"
 
         st.markdown(timeline_html, unsafe_allow_html=True)
-
 
     # 6) 세션 리셋 버튼 (협상 상태만 리셋)
     if st.button("🔄 협상 세션 리셋", key="reset_neg_model"):
