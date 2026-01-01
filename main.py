@@ -857,6 +857,9 @@ if page == "p2":
                 key="next_corp",
             )
 
+        # ✅ (오류 수정) form 내부에 submit 버튼이 반드시 있어야 하고,
+        #    calc_submit이 여기서 정의되어야 NameError가 나지 않습니다.
+        calc_submit = st.form_submit_button("계산")
 
     if calc_submit:
         if not current_corp or not next_corp:
