@@ -827,6 +827,7 @@ if page == "p2":
 
         st.markdown("#### 이직 여부 입력값")
         col3, col4 = st.columns(2)
+
         with col3:
             years = st.number_input(
                 "연차 (년)",
@@ -835,8 +836,12 @@ if page == "p2":
                 value=3.0,
                 step=0.5,
             )
-            current_corp = st.text_input("현재 기업", placeholder="현재 기업을 입력해주세요."),
-            key="current_corp"
+            current_corp = st.text_input(
+                "현재 기업",
+                placeholder="현재 기업을 입력해주세요.",
+                key="current_corp",
+            )
+
         with col4:
             salary = st.number_input(
                 "현재 연봉 (원)",
@@ -846,10 +851,12 @@ if page == "p2":
                 step=1_000_000.0,
                 format="%.0f",
             )
-            next_corp = st.text_input("이직 기업", placeholder="이직을 하려는 기업을 입력해주세요."),
-            key="next_corp"
+            next_corp = st.text_input(
+                "이직 기업",
+                placeholder="이직을 하려는 기업을 입력해주세요.",
+                key="next_corp",
+            )
 
-        calc_submit = st.form_submit_button("계산")
 
     if calc_submit:
         if not current_corp or not next_corp:
