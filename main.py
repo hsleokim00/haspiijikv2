@@ -835,7 +835,7 @@ if page == "p2":
                 value=3.0,
                 step=0.5,
             )
-            current_corp = st.text_input("현재 기업", placeholder="예: 강원랜드")
+            current_corp = st.text_input("현재 기업", placeholder="현재 기업을 입력해주세요.")
         with col4:
             salary = st.number_input(
                 "현재 연봉 (원)",
@@ -845,7 +845,7 @@ if page == "p2":
                 step=1_000_000.0,
                 format="%.0f",
             )
-            next_corp = st.text_input("이직 기업", placeholder="예: 삼성전자")
+            next_corp = st.text_input("이직 기업", placeholder="이직을 하려는 기업을 입력해주세요.")
 
         calc_submit = st.form_submit_button("계산")
 
