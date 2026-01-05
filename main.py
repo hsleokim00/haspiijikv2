@@ -1082,11 +1082,11 @@ elif page == "p3":
 
 # ===================== PAGE 4: 협상 시뮬레이터 (NegotiationModel 기반) =====================
 elif page == "p4":
-    if st.button("뒤로 (연봉협상 메뉴로)", key="back_to_p3_from_p4"):
+    if st.button("뒤로가", key="back_to_p3_from_p4"):
         st.session_state["page"] = "p3"
         st.rerun()
 
-    st.markdown("### 협상 시뮬레이터 (게임이론 + 휴리스틱)")
+    st.markdown("### 협상 시뮬레이터")
     st.caption(
         "루빈스타인 모형에서 출발한 할인율(δ) 개념과 "
         "목표 연봉 S, 최소 수용 연봉 B, 직종별 최대 연봉 E_max를 바탕으로 "
@@ -1250,7 +1250,7 @@ elif page == "p4":
 
     # 3) 모델이 아직 없으면 안내 후 종료
     if neg_model is None:
-        st.info("위에서 협상 기본 설정을 마친 뒤, 새 협상 세션을 시작할 필요가 있다.")
+        st.info("위에서 협상 기본 설정을 마친 뒤, 새로운 협상 세션을 시작하십시.")
         st.stop()
 
     # 4) 현재 상태 요약 보여주기 (가독성 개선 – HTML 카드 제거)
