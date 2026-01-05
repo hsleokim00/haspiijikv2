@@ -1082,7 +1082,7 @@ elif page == "p3":
 
 # ===================== PAGE 4: 협상 시뮬레이터 (NegotiationModel 기반) =====================
 elif page == "p4":
-    if st.button("뒤로가", key="back_to_p3_from_p4"):
+    if st.button("뒤로", key="back_to_p3_from_p4"):
         st.session_state["page"] = "p3"
         st.rerun()
 
