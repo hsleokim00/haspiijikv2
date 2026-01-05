@@ -1059,7 +1059,7 @@ if page == "p2":
 
 # ===================== PAGE 3: 연봉협상 메뉴 =====================
 elif page == "p3":
-    if st.button("뒤로 (이직 여부 결정으로)", key="back_to_p2"):
+    if st.button("뒤로", key="back_to_p2"):
         st.session_state["page"] = "p2"
         st.rerun()
 
